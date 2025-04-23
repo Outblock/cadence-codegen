@@ -11,14 +11,23 @@ import (
 
 // Generator handles TypeScript code generation
 type Generator struct {
-	Report analyzer.Report
+	Report  analyzer.Report
+	Files   map[string]string
+	BaseDir string
 }
 
 // New creates a new TypeScript code generator
 func New(report analyzer.Report) *Generator {
 	return &Generator{
-		Report: report,
+		Report:  report,
+		Files:   make(map[string]string),
+		BaseDir: "",
 	}
+}
+
+// SetBaseDir sets the base directory for reading files
+func (g *Generator) SetBaseDir(dir string) {
+	g.BaseDir = dir
 }
 
 // typeMapping maps Cadence types to TypeScript types
@@ -29,76 +38,96 @@ var typeMapping = map[string]string{
 	"UInt8":     "number",
 	"UInt16":    "number",
 	"UInt32":    "number",
-	"UInt64":    "string", // Use string for large numbers
+	"UInt64":    "number",
 	"UInt128":   "string",
 	"UInt256":   "string",
 	"Int8":      "number",
 	"Int16":     "number",
 	"Int32":     "number",
-	"Int64":     "string", // Use string for large numbers
+	"Int64":     "number",
 	"Int128":    "string",
 	"Int256":    "string",
 	"Bool":      "boolean",
 	"Address":   "string",
-	"UFix64":    "string",
-	"Fix64":     "string",
+	"UFix64":    "number",
+	"Fix64":     "number",
 	"AnyStruct": "any",
 }
 
-const interfaceTemplate = `
+// fclTypeMapping only includes types that need special handling in FCL
+var fclTypeMapping = map[string]string{
+	"UInt128":   "UInt128",
+	"UInt256":   "UInt256",
+	"Int128":    "Int128",
+	"Int256":    "Int256",
+	"AnyStruct": "Any",
+}
+
+// TypeScriptFunction represents a function in the generated code
+type TypeScriptFunction struct {
+	Name       string
+	Parameters []TypeScriptParameter
+	ReturnType string
+	Base64     string
+	Type       string
+}
+
+// TypeScriptParameter represents a parameter in TypeScript
+type TypeScriptParameter struct {
+	Name     string
+	Type     string
+	Optional bool
+	TypeStr  string // Original Cadence type string
+}
+
+// TypeScriptInterface represents an interface in TypeScript
+type TypeScriptInterface struct {
+	Name   string
+	Fields []TypeScriptField
+}
+
+// TypeScriptField represents a field in a TypeScript interface
+type TypeScriptField struct {
+	Name     string
+	Type     string
+	Optional bool
+}
+
+const interfaceTemplate = `/** Generated Cadence interface */
 export interface {{.Name}} {
-    {{- range .Fields}}
-    {{.Name}}: {{.Type}}{{if .Optional}} | null{{end}};
-    {{- end}}
-}
-`
+{{- range .Fields}}
+    {{.Name}}{{if .Optional}}?{{end}}: {{.Type}};
+{{- end}}
+}`
 
-const enumTemplate = `
-{{if .Tag}}
-// Generated from Cadence files in {{.Tag}} folder
-export namespace CadenceGen.{{.Tag}} {
-{{else}}
-// Generated from Cadence files
-export namespace CadenceGen {
-{{end}}
-    export type CadenceType = 'query' | 'transaction';
+const functionTemplate = `/** Generated from Cadence files{{if .Tag}} in {{.Tag}} folder{{end}} */
+{{- range $index, $func := .Functions}}
+{{if $index}}
 
-    export interface CadenceTargetType {
-        cadenceBase64: string;
-        type: CadenceType;
-        args: any[];
-    }
-
-    {{- range .Cases}}
-    export interface {{.Name}}Args {
-        {{- range .Parameters}}
-        {{.Name}}: {{.Type}}{{if .Optional}} | null{{end}};
-        {{- end}}
-    }
-
-    export interface {{.Name}}Target extends CadenceTargetType {
-        type: {{.Type}};
-        {{- if .ReturnType}}
-        returnType: {{.ReturnType}};
-        {{- end}}
-        args: [{{.Name}}Args];
-    }
-    {{- end}}
-
-    export const targets = {
-        {{- range .Cases}}
-        {{.Name}}: (args: {{.Name}}Args): {{.Name}}Target => ({
-            cadenceBase64: "{{.Base64}}",
-            type: "{{.Type}}",
-            {{- if .ReturnType}}
-            returnType: "{{.ReturnType}}",
+{{end}}export const {{$func.Name}} = async ({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} => {
+    const code = decodeCadence("{{$func.Base64}}");
+    {{- if eq $func.Type "query"}}
+    const result = await fcl.query({
+        cadence: code,
+        args: (arg, t) => [
+            {{- range $func.Parameters}}
+            arg({{.Name}}, {{getFCLType .TypeStr}}),
             {{- end}}
-            args: [args]
-        }),
-        {{- end}}
-    };
-}
-`
+        ],
+    });
+    return result;
+    {{- else}}
+    const txId = await fcl.mutate({
+        cadence: code,
+        args: (arg, t) => [
+            {{- range $func.Parameters}}
+            arg({{.Name}}, {{getFCLType .TypeStr}}),
+            {{- end}}
+        ],
+    });
+    return txId;
+    {{- end}}
+};{{- end}}`
 
 // formatFunctionName formats the filename into a valid TypeScript function name
 func formatFunctionName(filename string) string {
@@ -125,65 +154,125 @@ func formatFunctionName(filename string) string {
 	return strings.Join(parts, "")
 }
 
+// getFCLType gets the FCL type annotation for a Cadence type
+func getFCLType(cadenceType string) string {
+	// Check if it's an array type
+	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
+		// Extract element type
+		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
+		elementType = strings.TrimSpace(elementType)
+		return fmt.Sprintf("t.Array(%s)", getFCLType(elementType))
+	}
+
+	// Check if it's a dictionary type
+	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
+		// Extract key and value types
+		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
+		parts := strings.Split(inner, ":")
+		if len(parts) == 2 {
+			keyType := strings.TrimSpace(parts[0])
+			valueType := strings.TrimSpace(parts[1])
+			return fmt.Sprintf("t.Dictionary({ key: %s, value: %s })", getFCLType(keyType), getFCLType(valueType))
+		}
+	}
+
+	// For special cases, use the FCL type mapping
+	if fclType, ok := fclTypeMapping[cadenceType]; ok {
+		return fmt.Sprintf("t.%s", fclType)
+	}
+
+	// For all other types, use the type name with t. prefix
+	return fmt.Sprintf("t.%s", cadenceType)
+}
+
+// convertCadenceTypeToTypeScript converts a Cadence type to its TypeScript equivalent
+func convertCadenceTypeToTypeScript(cadenceType string) string {
+	// Check if it's an optional type
+	if strings.HasSuffix(cadenceType, "?") {
+		baseType := strings.TrimSuffix(cadenceType, "?")
+		tsType := convertCadenceTypeToTypeScript(baseType)
+		return fmt.Sprintf("%s | undefined", tsType)
+	}
+
+	// Check if it's an array type
+	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
+		// Extract element type
+		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
+		elementType = strings.TrimSpace(elementType)
+
+		// Convert element type using type mapping
+		tsElementType, ok := typeMapping[elementType]
+		if !ok {
+			tsElementType = elementType
+		}
+
+		return fmt.Sprintf("%s[]", tsElementType)
+	}
+
+	// Check if it's a dictionary type
+	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
+		// Extract key and value types
+		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
+		parts := strings.Split(inner, ":")
+		if len(parts) == 2 {
+			keyType := strings.TrimSpace(parts[0])
+			valueType := strings.TrimSpace(parts[1])
+
+			// Convert key and value types
+			tsKeyType, ok := typeMapping[keyType]
+			if !ok {
+				tsKeyType = keyType
+			}
+			tsValueType, ok := typeMapping[valueType]
+			if !ok {
+				tsValueType = valueType
+			}
+
+			return fmt.Sprintf("Record<%s, %s>", tsKeyType, tsValueType)
+		}
+	}
+
+	// For non-dictionary types, use the type mapping
+	tsType, ok := typeMapping[cadenceType]
+	if !ok {
+		return cadenceType
+	}
+	return tsType
+}
+
 // Generate generates TypeScript code for all transactions and scripts
 func (g *Generator) Generate() (string, error) {
 	var buffer bytes.Buffer
-	var cases []struct {
-		Name       string
-		Parameters []struct {
-			Name     string
-			Type     string
-			Optional bool
-		}
-		ReturnType string
-		Base64     string
-		Type       string
-	}
-	var interfaces []struct {
-		Name   string
-		Fields []struct {
-			Name     string
-			Type     string
-			Optional bool
-		}
-	}
+	var functions []TypeScriptFunction
+	var interfaces []TypeScriptInterface
 
-	// Generate interfaces from structs
+	// Map to store functions by tag
+	taggedFunctions := make(map[string][]TypeScriptFunction)
+
+	// Add header with imports
+	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n\n")
+	buffer.WriteString("/** Utility function to decode Base64 Cadence code */\n")
+	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
+	buffer.WriteString("/** Generated from Cadence files */\n")
+
+	// Generate interfaces from composite types
 	for name, composite := range g.Report.Structs {
-		iface := struct {
-			Name   string
-			Fields []struct {
-				Name     string
-				Type     string
-				Optional bool
-			}
-		}{
-			Name: name,
-			Fields: make([]struct {
-				Name     string
-				Type     string
-				Optional bool
-			}, 0),
+		tsInterface := TypeScriptInterface{
+			Name:   name,
+			Fields: make([]TypeScriptField, 0),
 		}
 
 		for _, field := range composite.Fields {
-			tsType, ok := typeMapping[field.TypeStr]
-			if !ok {
-				tsType = field.TypeStr
-			}
+			tsType := convertCadenceTypeToTypeScript(field.TypeStr)
 
-			iface.Fields = append(iface.Fields, struct {
-				Name     string
-				Type     string
-				Optional bool
-			}{
+			tsInterface.Fields = append(tsInterface.Fields, TypeScriptField{
 				Name:     field.Name,
 				Type:     tsType,
 				Optional: field.Optional,
 			})
 		}
 
-		interfaces = append(interfaces, iface)
+		interfaces = append(interfaces, tsInterface)
 	}
 
 	// Generate interface code
@@ -192,176 +281,103 @@ func (g *Generator) Generate() (string, error) {
 		return "", fmt.Errorf("failed to parse interface template: %w", err)
 	}
 
-	for _, iface := range interfaces {
-		err = interfaceTmpl.Execute(&buffer, iface)
+	for _, i := range interfaces {
+		err = interfaceTmpl.Execute(&buffer, i)
 		if err != nil {
 			return "", fmt.Errorf("failed to execute interface template: %w", err)
 		}
 		buffer.WriteString("\n")
 	}
 
-	// Map to store cases by tag
-	taggedCases := make(map[string][]struct {
-		Name       string
-		Parameters []struct {
-			Name     string
-			Type     string
-			Optional bool
-		}
-		ReturnType string
-		Base64     string
-		Type       string
-	})
-
-	// Generate cases for transactions
+	// Generate functions for transactions
 	for filename, result := range g.Report.Transactions {
-		c := struct {
-			Name       string
-			Parameters []struct {
-				Name     string
-				Type     string
-				Optional bool
-			}
-			ReturnType string
-			Base64     string
-			Type       string
-		}{
-			Name: formatFunctionName(filename),
-			Parameters: make([]struct {
-				Name     string
-				Type     string
-				Optional bool
-			}, 0),
-			Base64: result.Base64,
-			Type:   "transaction",
+		tsFunction := TypeScriptFunction{
+			Name:       formatFunctionName(filename),
+			Parameters: make([]TypeScriptParameter, 0),
+			Base64:     result.Base64,
+			Type:       "transaction",
 		}
 
 		for _, param := range result.Parameters {
-			tsType, ok := typeMapping[param.TypeStr]
-			if !ok {
-				tsType = param.TypeStr
-			}
+			tsType := convertCadenceTypeToTypeScript(param.TypeStr)
 
-			c.Parameters = append(c.Parameters, struct {
-				Name     string
-				Type     string
-				Optional bool
-			}{
+			tsFunction.Parameters = append(tsFunction.Parameters, TypeScriptParameter{
 				Name:     param.Name,
 				Type:     tsType,
 				Optional: param.Optional,
+				TypeStr:  param.TypeStr,
 			})
 		}
 
 		if result.Tag != "" {
-			taggedCases[result.Tag] = append(taggedCases[result.Tag], c)
+			taggedFunctions[result.Tag] = append(taggedFunctions[result.Tag], tsFunction)
 		} else {
-			cases = append(cases, c)
+			functions = append(functions, tsFunction)
 		}
 	}
 
-	// Generate cases for scripts
+	// Generate functions for scripts
 	for filename, result := range g.Report.Scripts {
-		c := struct {
-			Name       string
-			Parameters []struct {
-				Name     string
-				Type     string
-				Optional bool
-			}
-			ReturnType string
-			Base64     string
-			Type       string
-		}{
-			Name: formatFunctionName(filename),
-			Parameters: make([]struct {
-				Name     string
-				Type     string
-				Optional bool
-			}, 0),
-			Base64: result.Base64,
-			Type:   "query",
+		tsFunction := TypeScriptFunction{
+			Name:       formatFunctionName(filename),
+			Parameters: make([]TypeScriptParameter, 0),
+			Base64:     result.Base64,
+			Type:       "query",
 		}
 
 		if result.ReturnType != "" {
-			tsType, ok := typeMapping[result.ReturnType]
-			if !ok {
-				tsType = result.ReturnType
-			}
-			c.ReturnType = tsType
+			tsType := convertCadenceTypeToTypeScript(result.ReturnType)
+			tsFunction.ReturnType = tsType
 		}
 
 		for _, param := range result.Parameters {
-			tsType, ok := typeMapping[param.TypeStr]
-			if !ok {
-				tsType = param.TypeStr
-			}
+			tsType := convertCadenceTypeToTypeScript(param.TypeStr)
 
-			c.Parameters = append(c.Parameters, struct {
-				Name     string
-				Type     string
-				Optional bool
-			}{
+			tsFunction.Parameters = append(tsFunction.Parameters, TypeScriptParameter{
 				Name:     param.Name,
 				Type:     tsType,
 				Optional: param.Optional,
+				TypeStr:  param.TypeStr,
 			})
 		}
 
 		if result.Tag != "" {
-			taggedCases[result.Tag] = append(taggedCases[result.Tag], c)
+			taggedFunctions[result.Tag] = append(taggedFunctions[result.Tag], tsFunction)
 		} else {
-			cases = append(cases, c)
+			functions = append(functions, tsFunction)
 		}
 	}
 
-	// Generate enum with all cases
-	tmpl, err := template.New("enum").Parse(enumTemplate)
+	// Generate functions
+	funcMap := template.FuncMap{
+		"getFCLType": getFCLType,
+	}
+	tmpl, err := template.New("function").Funcs(funcMap).Parse(functionTemplate)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	// First generate the base CadenceGen namespace
+	// First generate the base functions
 	err = tmpl.Execute(&buffer, struct {
-		Cases []struct {
-			Name       string
-			Parameters []struct {
-				Name     string
-				Type     string
-				Optional bool
-			}
-			ReturnType string
-			Base64     string
-			Type       string
-		}
-		Tag string
+		Functions []TypeScriptFunction
+		Tag       string
 	}{
-		Cases: cases,
-		Tag:   "",
+		Functions: functions,
+		Tag:       "",
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	// Then generate tagged cases in separate namespaces
-	for tag, tagCases := range taggedCases {
+	// Then generate tagged functions in separate sections
+	for tag, tagFunctions := range taggedFunctions {
 		buffer.WriteString("\n")
 		err = tmpl.Execute(&buffer, struct {
-			Cases []struct {
-				Name       string
-				Parameters []struct {
-					Name     string
-					Type     string
-					Optional bool
-				}
-				ReturnType string
-				Base64     string
-				Type       string
-			}
-			Tag string
+			Functions []TypeScriptFunction
+			Tag       string
 		}{
-			Cases: tagCases,
-			Tag:   tag,
+			Functions: tagFunctions,
+			Tag:       tag,
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to execute template: %w", err)
