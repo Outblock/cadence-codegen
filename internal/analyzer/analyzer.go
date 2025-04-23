@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,22 @@ type Import struct {
 	Address  string `json:"address"`
 }
 
+// Field represents a field in a struct
+type Field struct {
+	Name     string `json:"name"`
+	TypeStr  string `json:"typeStr"`
+	Optional bool   `json:"optional"`
+	Access   string `json:"access"`
+}
+
+// Struct represents a Cadence struct declaration
+type Struct struct {
+	Name     string  `json:"name"`
+	Fields   []Field `json:"fields"`
+	Access   string  `json:"access"`
+	FileName string  `json:"fileName"`
+}
+
 // AnalysisResult represents the analysis result of a single Cadence file
 type AnalysisResult struct {
 	FileName   string      `json:"fileName"`
@@ -38,33 +55,43 @@ type AnalysisResult struct {
 	Parameters []Parameter `json:"parameters"`
 	ReturnType string      `json:"returnType,omitempty"`
 	Imports    []Import    `json:"imports"`
+	Base64     string      `json:"base64,omitempty"`
+	Tag        string      `json:"tag,omitempty"`
 }
 
 // Report represents the complete analysis report
 type Report struct {
-	Transactions map[string]AnalysisResult `json:"transactions"`
-	Scripts      map[string]AnalysisResult `json:"scripts"`
+	Transactions  map[string]AnalysisResult `json:"transactions"`
+	Scripts       map[string]AnalysisResult `json:"scripts"`
+	Structs       map[string]Struct         `json:"structs"`
+	IncludeBase64 bool                      `json:"-"`
 }
 
 // Analyzer is responsible for analyzing Cadence files
 type Analyzer struct {
-	Transactions map[string]AnalysisResult
-	Scripts      map[string]AnalysisResult
+	Transactions  map[string]AnalysisResult
+	Scripts       map[string]AnalysisResult
+	Structs       map[string]Struct
+	IncludeBase64 bool
 }
 
 // New creates a new Analyzer instance
 func New() *Analyzer {
 	return &Analyzer{
-		Transactions: make(map[string]AnalysisResult),
-		Scripts:      make(map[string]AnalysisResult),
+		Transactions:  make(map[string]AnalysisResult),
+		Scripts:       make(map[string]AnalysisResult),
+		Structs:       make(map[string]Struct),
+		IncludeBase64: false,
 	}
 }
 
 // GetReport returns the current analysis report
-func (a *Analyzer) GetReport() Report {
-	return Report{
-		Transactions: a.Transactions,
-		Scripts:      a.Scripts,
+func (a *Analyzer) GetReport() *Report {
+	return &Report{
+		Transactions:  a.Transactions,
+		Scripts:       a.Scripts,
+		Structs:       a.Structs,
+		IncludeBase64: a.IncludeBase64,
 	}
 }
 
@@ -102,10 +129,66 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 	imports, codeWithoutImports := extractImports(content)
 
 	fileName := filepath.Base(filePath)
+	// Get parent directory name as tag
+	tag := filepath.Base(filepath.Dir(filePath))
+	if tag == "." {
+		tag = ""
+	}
+
 	memoryGauge := &SimpleMemoryGauge{}
 	program, err := parser.ParseProgram(memoryGauge, codeWithoutImports, parser.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse file: %w", err)
+	}
+
+	// Create base result with common fields
+	result := &AnalysisResult{
+		FileName: fileName,
+		Imports:  imports,
+	}
+
+	// Only set tag if it's not empty
+	if tag != "" {
+		result.Tag = tag
+	}
+
+	// Add base64 content if enabled
+	if a.IncludeBase64 {
+		result.Base64 = base64.StdEncoding.EncodeToString(content)
+	}
+
+	// Check for struct declarations
+	for _, declaration := range program.Declarations() {
+		if structDecl, ok := declaration.(*ast.CompositeDeclaration); ok {
+			// Check if it's a struct by checking the composite kind
+			if structDecl.CompositeKind == common.CompositeKindStructure {
+				fields := make([]Field, 0)
+
+				for _, member := range structDecl.Members.Declarations() {
+					if field, ok := member.(*ast.FieldDeclaration); ok {
+						var optional bool
+						if _, isOptional := field.TypeAnnotation.Type.(*ast.OptionalType); isOptional {
+							optional = true
+						}
+
+						fields = append(fields, Field{
+							Name:     field.Identifier.String(),
+							TypeStr:  field.TypeAnnotation.String(),
+							Optional: optional,
+							Access:   field.Access.String(),
+						})
+					}
+				}
+
+				structName := structDecl.Identifier.String()
+				a.Structs[structName] = Struct{
+					Name:     structName,
+					Fields:   fields,
+					Access:   structDecl.Access.String(),
+					FileName: fileName,
+				}
+			}
+		}
 	}
 
 	// Check for transaction declaration
@@ -121,12 +204,8 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 					})
 				}
 			}
-			result := &AnalysisResult{
-				FileName:   fileName,
-				Type:       "transaction",
-				Parameters: params,
-				Imports:    imports,
-			}
+			result.Type = "transaction"
+			result.Parameters = params
 			a.Transactions[fileName] = *result
 			return result, nil
 		}
@@ -146,12 +225,8 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 						})
 					}
 				}
-				result := &AnalysisResult{
-					FileName:   fileName,
-					Type:       "script",
-					Parameters: params,
-					Imports:    imports,
-				}
+				result.Type = "script"
+				result.Parameters = params
 				if function.ReturnTypeAnnotation != nil {
 					result.ReturnType = function.ReturnTypeAnnotation.Type.String()
 				}
@@ -175,12 +250,8 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 						})
 					}
 				}
-				result := &AnalysisResult{
-					FileName:   fileName,
-					Type:       "script",
-					Parameters: params,
-					Imports:    imports,
-				}
+				result.Type = "script"
+				result.Parameters = params
 				if function.ReturnTypeAnnotation != nil {
 					result.ReturnType = function.ReturnTypeAnnotation.Type.String()
 				}
@@ -208,4 +279,9 @@ func (a *Analyzer) AnalyzeDirectory(dirPath string) error {
 
 		return nil
 	})
+}
+
+// SetIncludeBase64 sets whether to include base64-encoded content in the analysis results
+func (a *Analyzer) SetIncludeBase64(include bool) {
+	a.IncludeBase64 = include
 }
