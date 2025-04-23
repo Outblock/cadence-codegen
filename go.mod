@@ -7,6 +7,7 @@ toolchain go1.23.8
 require (
 	github.com/onflow/cadence v1.3.2
 	github.com/spf13/cobra v1.8.0
+	golang.org/x/text v0.24.0
 )
 
 require (
@@ -17,6 +18,5 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/turbolent/prettier v0.0.0-20220320183459-661cc755135d // indirect
 	golang.org/x/exp v0.0.0-20240103183307-be819d1f06fc // indirect
-	golang.org/x/text v0.24.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 )
