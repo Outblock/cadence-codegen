@@ -7,7 +7,6 @@ toolchain go1.23.8
 require (
 	github.com/onflow/cadence v1.3.2
 	github.com/spf13/cobra v1.8.0
-	golang.org/x/text v0.24.0
 )
 
 require (

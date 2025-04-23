@@ -51,7 +51,7 @@ var typeMapping = map[string]string{
 	"Address":   "Flow.Address",
 	"UFix64":    "Decimal",
 	"Fix64":     "Decimal",
-	"AnyStruct": "Any",
+	"AnyStruct": "AnyDecodable",
 }
 
 // SwiftCase represents a case in the generated enum
@@ -168,6 +168,54 @@ func formatFunctionName(filename string) string {
 	return strings.Join(parts, "")
 }
 
+// convertCadenceTypeToSwift converts a Cadence type to its Swift equivalent
+func convertCadenceTypeToSwift(cadenceType string) string {
+	// Check if it's an array type
+	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
+		// Extract element type
+		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
+		elementType = strings.TrimSpace(elementType)
+
+		// Convert element type using type mapping
+		swiftElementType, ok := typeMapping[elementType]
+		if !ok {
+			swiftElementType = elementType
+		}
+
+		return fmt.Sprintf("[%s]", swiftElementType)
+	}
+
+	// Check if it's a dictionary type
+	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
+		// Extract key and value types
+		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
+		parts := strings.Split(inner, ":")
+		if len(parts) == 2 {
+			keyType := strings.TrimSpace(parts[0])
+			valueType := strings.TrimSpace(parts[1])
+
+			// Convert key and value types
+			swiftKeyType, ok := typeMapping[keyType]
+			if !ok {
+				swiftKeyType = keyType
+			}
+			swiftValueType, ok := typeMapping[valueType]
+			if !ok {
+				swiftValueType = valueType
+			}
+
+			return fmt.Sprintf("Dictionary<%s, %s>", swiftKeyType, swiftValueType)
+		}
+	}
+
+	// For non-dictionary types, use the type mapping
+	swiftType, ok := typeMapping[cadenceType]
+	if !ok {
+		return cadenceType
+	}
+	return swiftType
+}
+
 // Generate generates Swift code for all transactions and scripts
 func (g *Generator) Generate() (string, error) {
 	var buffer bytes.Buffer
@@ -178,7 +226,7 @@ func (g *Generator) Generate() (string, error) {
 	taggedCases := make(map[string][]SwiftCase)
 
 	// Add header
-	buffer.WriteString("import Flow\nimport BigInt\n")
+	buffer.WriteString("import Flow\nimport BigInt\nimport Foundation\n")
 
 	// Generate structs from composite types
 	for name, composite := range g.Report.Structs {
@@ -189,10 +237,7 @@ func (g *Generator) Generate() (string, error) {
 		}
 
 		for _, field := range composite.Fields {
-			swiftType, ok := typeMapping[field.TypeStr]
-			if !ok {
-				swiftType = field.TypeStr
-			}
+			swiftType := convertCadenceTypeToSwift(field.TypeStr)
 
 			swiftStruct.Fields = append(swiftStruct.Fields, SwiftField{
 				Name:     field.Name,
@@ -228,10 +273,7 @@ func (g *Generator) Generate() (string, error) {
 		}
 
 		for _, param := range result.Parameters {
-			swiftType, ok := typeMapping[param.TypeStr]
-			if !ok {
-				swiftType = param.TypeStr
-			}
+			swiftType := convertCadenceTypeToSwift(param.TypeStr)
 
 			swiftCase.Parameters = append(swiftCase.Parameters, SwiftParameter{
 				Name:     param.Name,
@@ -257,18 +299,12 @@ func (g *Generator) Generate() (string, error) {
 		}
 
 		if result.ReturnType != "" {
-			swiftType, ok := typeMapping[result.ReturnType]
-			if !ok {
-				swiftType = result.ReturnType
-			}
+			swiftType := convertCadenceTypeToSwift(result.ReturnType)
 			swiftCase.ReturnType = swiftType
 		}
 
 		for _, param := range result.Parameters {
-			swiftType, ok := typeMapping[param.TypeStr]
-			if !ok {
-				swiftType = param.TypeStr
-			}
+			swiftType := convertCadenceTypeToSwift(param.TypeStr)
 
 			swiftCase.Parameters = append(swiftCase.Parameters, SwiftParameter{
 				Name:     param.Name,

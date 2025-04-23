@@ -9,7 +9,7 @@ struct StorageInfo: Decodable {
 }
 
 
-/// Generated from Cadence files
+/// Generated from Cadence filegis
 enum CadenceGen: CadenceTargetType, MirrorAssociated {
 
     case getDelegator(address: Flow.Address)
@@ -273,3 +273,22 @@ extension CadenceGen {
         }
     }
 } }
+
+public enum CadenceType: String {
+    case query
+    case transaction
+}
+
+public protocol CadenceTargetType {
+    
+    /// The target's base `URL`.
+    var cadenceBase64: String { get }
+
+    /// The HTTP method used in the request.
+    var type: CadenceType { get }
+    
+    /// The return type for decoding
+    var returnType: Decodable.Type { get }
+    
+    var arguments: [Flow.Argument] { get }
+}
