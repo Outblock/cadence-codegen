@@ -32,3 +32,5 @@ go.work
 ehthumbs.db
 Thumbs.db # Added by goreleaser init:
 dist/
+/generated
+cadence.json
