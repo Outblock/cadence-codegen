@@ -44,13 +44,12 @@ brews:
   - name: cadence-codegen
     homepage: "https://github.com/outblock/cadence-codegen"
     description: "A tool for analyzing Cadence smart contracts and generating code"
-    tap:
+    repository:
       owner: outblock
       name: homebrew-tap
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    folder: Formula
     install: |
       bin.install "cadence-codegen"
     test: |
