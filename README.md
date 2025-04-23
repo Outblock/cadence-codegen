@@ -2,14 +2,16 @@
 
 A tool for analyzing Cadence smart contracts and generating code. It extracts transaction and script information, including parameters, imports, and return types.
 
-## Features
-
-- Analyzes Cadence files (.cdc)
-- Extracts transaction and script information
-- Parses import statements
-- Generates structured JSON output
-
 ## Installation
+
+### Using Homebrew
+
+```bash
+brew tap outblock/tap
+brew install cadence-codegen
+```
+
+### Using Go
 
 ```bash
 go install github.com/outblock/cadence-codegen@latest
@@ -17,20 +19,51 @@ go install github.com/outblock/cadence-codegen@latest
 
 ## Usage
 
-```go
-analyzer := analyzer.New()
+### Analyze Cadence Files
 
-// Analyze a single file
-result, err := analyzer.AnalyzeFile("path/to/contract.cdc")
+Analyze Cadence files and generate a JSON report:
 
-// Analyze a directory
-err := analyzer.AnalyzeDirectory("path/to/contracts")
+```bash
+# Analyze a directory of Cadence files
+cadence-codegen analyze ./contracts
 
-// Get the complete report
-report := analyzer.GetReport()
+# Analyze with custom output path
+cadence-codegen analyze ./contracts output.json
+
+# Analyze without base64 encoding
+cadence-codegen analyze ./contracts --base64=false
 ```
 
-## Output Format
+### Generate Swift Code
+
+Generate Swift code from Cadence files or JSON:
+
+```bash
+# Generate from Cadence files (outputs to CadenceGen.swift)
+cadence-codegen swift ./contracts
+
+# Generate from Cadence files with custom output path
+cadence-codegen swift ./contracts output.swift
+
+# Generate from previously analyzed JSON
+cadence-codegen swift analysis.json output.swift
+```
+
+## Features
+
+- Analyzes Cadence files (.cdc)
+- Extracts:
+  - Transaction parameters and types
+  - Script parameters and return types
+  - Import statements
+  - Struct definitions
+- Generates:
+  - Structured JSON output
+  - Swift code with type-safe wrappers
+- Supports folder-based tagging for better organization
+- Base64 encoding of Cadence files (optional)
+
+## JSON Output Format
 
 ```json
 {
@@ -50,12 +83,45 @@ report := analyzer.GetReport()
           "contract": "FungibleToken",
           "address": "0xFungibleToken"
         }
-      ]
+      ],
+      "tag": "TokenTransfer"
     }
   },
   "scripts": {
     // Similar structure for scripts
+  },
+  "structs": {
+    // Struct definitions
   }
+}
+```
+
+## Generated Swift Code
+
+The generated Swift code includes:
+- Type-safe enums for transactions and scripts
+  - Separate enums for each folder (e.g., `CadenceGen.EVM` for files in the EVM folder)
+  - Main `CadenceGen` enum for files in the root directory
+- Struct definitions with proper Swift types
+- Automatic Flow SDK integration
+- Support for async/await
+- Error handling
+
+Example usage of generated Swift code:
+
+```swift
+// Execute a script from the EVM folder
+let result: String? = try await flow.query(CadenceGen.EVM.getAddr(flowAddress: address))
+
+// Execute a script from the root directory
+let result: String? = try await flow.query(CadenceGen.getAddr(flowAddress: address))
+
+// Send a transaction
+let txId = try await flow.sendTx(
+    CadenceGen.EVM.createCoa(amount: amount),
+    singers: [signer]
+) { 
+    // Transaction build options
 }
 ```
 

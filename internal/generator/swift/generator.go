@@ -7,8 +7,6 @@ import (
 	"text/template"
 
 	"github.com/outblock/cadence-codegen/internal/analyzer"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // Generator handles Swift code generation
@@ -34,21 +32,26 @@ func (g *Generator) SetBaseDir(dir string) {
 
 // typeMapping maps Cadence types to Swift types
 var typeMapping = map[string]string{
-	"String":  "String",
-	"Int":     "Int",
-	"UInt":    "UInt",
-	"UInt8":   "UInt8",
-	"UInt16":  "UInt16",
-	"UInt32":  "UInt32",
-	"UInt64":  "UInt64",
-	"Int8":    "Int8",
-	"Int16":   "Int16",
-	"Int32":   "Int32",
-	"Int64":   "Int64",
-	"Bool":    "Bool",
-	"Address": "Flow.Address",
-	"UFix64":  "UFix64",
-	"Fix64":   "Fix64",
+	"String":    "String",
+	"Int":       "Int",
+	"UInt":      "UInt",
+	"UInt8":     "UInt8",
+	"UInt16":    "UInt16",
+	"UInt32":    "UInt32",
+	"UInt64":    "UInt64",
+	"UInt128":   "BigUInt",
+	"UInt256":   "BigUInt",
+	"Int8":      "Int8",
+	"Int16":     "Int16",
+	"Int32":     "Int32",
+	"Int64":     "Int64",
+	"Int128":    "BigInt",
+	"Int256":    "BigInt",
+	"Bool":      "Bool",
+	"Address":   "Flow.Address",
+	"UFix64":    "Decimal",
+	"Fix64":     "Decimal",
+	"AnyStruct": "Any",
 }
 
 // SwiftCase represents a case in the generated enum
@@ -83,7 +86,7 @@ type SwiftField struct {
 
 const structTemplate = `
 /// Generated Cadence struct
-struct {{.Name}}: Codable, FlowEncodable {
+struct {{.Name}}: Decodable {
     {{- range .Fields}}
     let {{.Name}}: {{.Type}}{{if .Optional}}?{{end}}
     {{- end}}
@@ -91,8 +94,11 @@ struct {{.Name}}: Codable, FlowEncodable {
 `
 
 const enumTemplate = `
-/// Generated from Cadence files
-enum CadenceGen: CadenceTargetType, MirrorAssociated {
+/// Generated from Cadence files{{if .Tag}} in {{.Tag}} folder{{end}}
+{{if .Tag}}extension CadenceGen {
+    enum {{.Tag}}: CadenceTargetType, MirrorAssociated {
+{{else}}enum CadenceGen: CadenceTargetType, MirrorAssociated {
+{{end}}
     {{- range .Cases}}
     case {{.Name}}({{- range $index, $param := .Parameters}}{{if $index}}, {{end}}{{$param.Name}}: {{$param.Type}}{{if $param.Optional}}?{{end}}{{- end}})
     {{- end}}
@@ -135,8 +141,7 @@ enum CadenceGen: CadenceTargetType, MirrorAssociated {
         {{- end}}
         }
     }
-}
-`
+}{{if .Tag}} }{{end}}`
 
 // formatFunctionName formats the filename into a valid Swift function name
 func formatFunctionName(filename string) string {
@@ -146,11 +151,19 @@ func formatFunctionName(filename string) string {
 	parts := strings.FieldsFunc(name, func(r rune) bool {
 		return r == '_' || r == '-'
 	})
-	// Capitalize each part
-	caser := cases.Title(language.English)
-	for i := 0; i < len(parts); i++ {
-		parts[i] = caser.String(parts[i])
+
+	// First convert all parts to lowercase
+	for i := range parts {
+		parts[i] = strings.ToLower(parts[i])
 	}
+
+	// Then capitalize each part except the first one
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+
 	// Join back together
 	return strings.Join(parts, "")
 }
@@ -161,70 +174,11 @@ func (g *Generator) Generate() (string, error) {
 	var cases []SwiftCase
 	var structs []SwiftStruct
 
+	// Map to store cases by tag
+	taggedCases := make(map[string][]SwiftCase)
+
 	// Add header
-	buffer.WriteString("import Flow\n\n")
-
-	// Add base types and protocols from template.swift
-	buffer.WriteString(`
-/// Internal Type
-internal enum CadenceType: String {
-    case query
-    case transaction
-}
-
-internal protocol CadenceTargetType {
-    var cadenceBase64: String { get }
-    var type: CadenceType { get }
-    var returnType: Decodable.Type { get }
-    var arguments: [Flow.Argument] { get }
-}
-
-protocol MirrorAssociated {
-    var associatedValues: [String: FlowEncodable] { get }
-}
-
-extension MirrorAssociated {
-    var associatedValues: [String: FlowEncodable] {
-        var values = [String: FlowEncodable]()
-        if let associated = Mirror(reflecting: self).children.first {
-            let children = Mirror(reflecting: associated.value).children
-            for case let item in children {
-                if let label = item.label, let value = item.value as? FlowEncodable {
-                    values[label] = value
-                }
-            }
-        }
-        return values
-    }
-}
-
-extension Flow {
-    func query<T: Decodable>(_ target: CadenceTargetType, chainID: Flow.ChainID = .mainnet) async throws -> T {
-        guard let data = Data(base64Encoded: target.cadenceBase64) else {
-            throw NSError(domain: "Invalid Cadence Base64 String", code: 9900001)
-        }
-        let api = Flow.FlowHTTPAPI(chainID: chainID)
-        return try await api.executeScriptAtLatestBlock(script: Flow.Script(data: data), arguments: target.arguments)
-            .decode()
-    }
-    
-    func sendTx(_ target: CadenceTargetType,
-                singers: [FlowSigner],
-                network: Flow.ChainID = .mainnet,
-                @Flow.TransactionBuilder builder: () -> [Flow.TransactionBuild]
-    ) async throws -> Flow.ID {
-        guard let data = Data(base64Encoded: target.cadenceBase64) else {
-            throw NSError(domain: "Invalid Cadence Base64 String", code: 9900001)
-        }
-        
-        var tx = try await flow.buildTransaction(builder: builder)
-        tx.script = .init(data: data)
-        tx.arguments = target.arguments
-        let signedTx = try await flow.signTransaction(unsignedTransaction: tx, signers: singers)
-        return try await flow.sendTransaction(transaction: signedTx)
-    }
-}
-`)
+	buffer.WriteString("import Flow\nimport BigInt\n")
 
 	// Generate structs from composite types
 	for name, composite := range g.Report.Structs {
@@ -286,7 +240,11 @@ extension Flow {
 			})
 		}
 
-		cases = append(cases, swiftCase)
+		if result.Tag != "" {
+			taggedCases[result.Tag] = append(taggedCases[result.Tag], swiftCase)
+		} else {
+			cases = append(cases, swiftCase)
+		}
 	}
 
 	// Generate cases for scripts
@@ -319,7 +277,11 @@ extension Flow {
 			})
 		}
 
-		cases = append(cases, swiftCase)
+		if result.Tag != "" {
+			taggedCases[result.Tag] = append(taggedCases[result.Tag], swiftCase)
+		} else {
+			cases = append(cases, swiftCase)
+		}
 	}
 
 	// Generate enum with all cases
@@ -328,13 +290,31 @@ extension Flow {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
+	// First generate the base CadenceGen enum
 	err = tmpl.Execute(&buffer, struct {
 		Cases []SwiftCase
+		Tag   string
 	}{
 		Cases: cases,
+		Tag:   "",
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	// Then generate tagged cases in separate extensions
+	for tag, tagCases := range taggedCases {
+		buffer.WriteString("\n")
+		err = tmpl.Execute(&buffer, struct {
+			Cases []SwiftCase
+			Tag   string
+		}{
+			Cases: tagCases,
+			Tag:   tag,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to execute template: %w", err)
+		}
 	}
 
 	return buffer.String(), nil

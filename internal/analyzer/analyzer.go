@@ -129,10 +129,44 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 	imports, codeWithoutImports := extractImports(content)
 
 	fileName := filepath.Base(filePath)
-	// Get parent directory name as tag
-	tag := filepath.Base(filepath.Dir(filePath))
-	if tag == "." {
-		tag = ""
+
+	// Get full directory path as tag
+	var tag string
+	dir := filepath.Dir(filePath)
+	if dir != "." {
+		// Split the path and remove any empty parts
+		parts := strings.Split(dir, string(filepath.Separator))
+		var validParts []string
+		for _, part := range parts {
+			if part != "" && part != "." {
+				validParts = append(validParts, part)
+			}
+		}
+
+		// Convert to camelCase
+		for i, part := range validParts {
+			// Split by underscores or hyphens
+			subParts := strings.FieldsFunc(part, func(r rune) bool {
+				return r == '_' || r == '-'
+			})
+			// Capitalize each part
+			for j, subPart := range subParts {
+				if i == 0 && j == 0 {
+					// First word starts with lowercase
+					subParts[j] = strings.ToLower(subPart)
+				} else {
+					subParts[j] = strings.Title(strings.ToLower(subPart))
+				}
+			}
+			validParts[i] = strings.Join(subParts, "")
+		}
+
+		// Join all parts
+		tag = strings.Join(validParts, "")
+		if tag != "" {
+			// Ensure first character is uppercase for Swift enum
+			tag = strings.Title(tag)
+		}
 	}
 
 	memoryGauge := &SimpleMemoryGauge{}
