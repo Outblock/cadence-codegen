@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,6 +65,7 @@ type Report struct {
 	Transactions  map[string]AnalysisResult `json:"transactions"`
 	Scripts       map[string]AnalysisResult `json:"scripts"`
 	Structs       map[string]Struct         `json:"structs"`
+	Addresses     map[string]interface{}    `json:"addresses,omitempty"`
 	IncludeBase64 bool                      `json:"-"`
 }
 
@@ -73,6 +75,7 @@ type Analyzer struct {
 	Scripts       map[string]AnalysisResult
 	Structs       map[string]Struct
 	IncludeBase64 bool
+	AddressesPath string // New field for storing addresses.json path
 }
 
 // New creates a new Analyzer instance
@@ -87,10 +90,24 @@ func New() *Analyzer {
 
 // GetReport returns the current analysis report
 func (a *Analyzer) GetReport() *Report {
+	var addresses map[string]interface{}
+	if a.AddressesPath != "" {
+		if data, err := os.ReadFile(a.AddressesPath); err == nil {
+			_ = json.Unmarshal(data, &addresses)
+		}
+	} else {
+		cwd, _ := os.Getwd()
+		if path, err := findAddressesJSONPath(cwd); err == nil {
+			if data, err := os.ReadFile(path); err == nil {
+				_ = json.Unmarshal(data, &addresses)
+			}
+		}
+	}
 	return &Report{
 		Transactions:  a.Transactions,
 		Scripts:       a.Scripts,
 		Structs:       a.Structs,
+		Addresses:     addresses,
 		IncludeBase64: a.IncludeBase64,
 	}
 }
@@ -300,6 +317,9 @@ func (a *Analyzer) AnalyzeFile(filePath string) (*AnalysisResult, error) {
 
 // AnalyzeDirectory analyzes all Cadence files in a directory and its subdirectories
 func (a *Analyzer) AnalyzeDirectory(dirPath string) error {
+	if path, err := findAddressesJSONRecursive(dirPath); err == nil {
+		a.AddressesPath = path
+	}
 	return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -318,4 +338,43 @@ func (a *Analyzer) AnalyzeDirectory(dirPath string) error {
 // SetIncludeBase64 sets whether to include base64-encoded content in the analysis results
 func (a *Analyzer) SetIncludeBase64(include bool) {
 	a.IncludeBase64 = include
+}
+
+// 2. Helper function: search upwards for addresses.json
+func findAddressesJSONPath(startPath string) (string, error) {
+	dir := startPath
+	for {
+		candidate := filepath.Join(dir, "addresses.json")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("addresses.json not found")
+}
+
+// New recursive search function
+func findAddressesJSONRecursive(root string) (string, error) {
+	var found string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filepath.Base(path) == "addresses.json" {
+			found = path
+			return fmt.Errorf("found") // Use error to stop walk early
+		}
+		return nil
+	})
+	if found != "" {
+		return found, nil
+	}
+	if err != nil && err.Error() == "found" {
+		return found, nil
+	}
+	return "", fmt.Errorf("addresses.json not found")
 }

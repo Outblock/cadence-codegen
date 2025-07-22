@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
@@ -100,34 +101,44 @@ export interface {{.Name}} {
 {{- end}}
 }`
 
-const functionTemplate = `/** Generated from Cadence files{{if .Tag}} in {{.Tag}} folder{{end}} */
-{{- range $index, $func := .Functions}}
+const functionTemplate = `{{- range $index, $func := .Functions}}
 {{if $index}}
 
-{{end}}export const {{$func.Name}} = async ({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} => {
+{{end}}  public async {{$func.Name}}({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} {
     const code = decodeCadence("{{$func.Base64}}");
     {{- if eq $func.Type "query"}}
-    const result = await fcl.query({
-        cadence: code,
-        args: (arg, t) => [
-            {{- range $func.Parameters}}
-            arg({{.Name}}, {{getFCLType .TypeStr}}),
-            {{- end}}
-        ],
-    });
+    let config = {
+      cadence: code,
+      name: "{{$func.Name}}",
+      type: "script",
+      args: (arg: any, t: any) => [
+        {{- range $func.Parameters}}
+        arg({{.Name}}, {{getFCLType .TypeStr}}),
+        {{- end}}
+      ],
+    };
+    config = await this.runRequestInterceptors(config);
+    let result = await fcl.query(config);
+    result = await this.runResponseInterceptors(result);
     return result;
     {{- else}}
-    const txId = await fcl.mutate({
-        cadence: code,
-        args: (arg, t) => [
-            {{- range $func.Parameters}}
-            arg({{.Name}}, {{getFCLType .TypeStr}}),
-            {{- end}}
-        ],
-    });
+    let config = {
+      cadence: code,
+      name: "{{$func.Name}}",
+      type: "transaction",
+      args: (arg: any, t: any) => [
+        {{- range $func.Parameters}}
+        arg({{.Name}}, {{getFCLType .TypeStr}}),
+        {{- end}}
+      ],
+    };
+    config = await this.runRequestInterceptors(config);
+    let txId = await fcl.mutate(config);
+    txId = await this.runResponseInterceptors(txId);
     return txId;
     {{- end}}
-};{{- end}}`
+  }
+{{- end}}`
 
 // formatFunctionName formats the filename into a valid TypeScript function name
 func formatFunctionName(filename string) string {
@@ -244,7 +255,8 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 func (g *Generator) Generate() (string, error) {
 	var buffer bytes.Buffer
 	var functions []TypeScriptFunction
-	var interfaces []TypeScriptInterface
+	// Remove interfaces variable declaration
+	// var interfaces []TypeScriptInterface
 
 	// Map to store functions by tag
 	taggedFunctions := make(map[string][]TypeScriptFunction)
@@ -255,39 +267,79 @@ func (g *Generator) Generate() (string, error) {
 	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
 	buffer.WriteString("/** Generated from Cadence files */\n")
 
+	// 1. Output all interfaces/types (including composite types)
+	// Add FlowSigner interface
+	buffer.WriteString("/** Flow Signer interface for transaction signing */\n")
+	buffer.WriteString("export interface FlowSigner {\n")
+	buffer.WriteString("  address: string;\n")
+	buffer.WriteString("  keyIndex: number;\n")
+	buffer.WriteString("  sign(signableData: Uint8Array): Promise<Uint8Array>;\n")
+	buffer.WriteString("  authzFunc: (account: any) => Promise<any>;\n")
+	buffer.WriteString("}\n\n")
+
+	// Add CompositeSignature and AuthorizationAccount interfaces
+	buffer.WriteString("export interface CompositeSignature {\n")
+	buffer.WriteString("  addr: string;\n")
+	buffer.WriteString("  keyId: number;\n")
+	buffer.WriteString("  signature: string;\n")
+	buffer.WriteString("}\n\n")
+	buffer.WriteString("export interface AuthorizationAccount extends Record<string, any> {\n")
+	buffer.WriteString("  tempId: string;\n")
+	buffer.WriteString("  addr: string;\n")
+	buffer.WriteString("  keyId: number;\n")
+	buffer.WriteString("  signingFunction: (signable: { message: string }) => Promise<CompositeSignature>;\n")
+	buffer.WriteString("}\n\n")
+	buffer.WriteString("export type AuthorizationFunction = (account: any) => Promise<AuthorizationAccount>;\n\n")
+
+	// Export addresses if available
+	if g.Report.Addresses != nil {
+		buffer.WriteString("/** Network addresses for contract imports */\n")
+		buffer.WriteString("export const addresses = ")
+		// Convert addresses to JSON string
+		addressesJSON, err := json.Marshal(g.Report.Addresses)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal addresses: %w", err)
+		}
+		buffer.WriteString(string(addressesJSON))
+		buffer.WriteString(";\n\n")
+	}
+
 	// Generate interfaces from composite types
-	for name, composite := range g.Report.Structs {
+	interfaceTmpl, err := template.New("interface").Parse(interfaceTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse interface template: %w", err)
+	}
+	for _, composite := range g.Report.Structs {
 		tsInterface := TypeScriptInterface{
-			Name:   name,
+			Name:   composite.Name,
 			Fields: make([]TypeScriptField, 0),
 		}
-
 		for _, field := range composite.Fields {
 			tsType := convertCadenceTypeToTypeScript(field.TypeStr)
-
 			tsInterface.Fields = append(tsInterface.Fields, TypeScriptField{
 				Name:     field.Name,
 				Type:     tsType,
 				Optional: field.Optional,
 			})
 		}
-
-		interfaces = append(interfaces, tsInterface)
-	}
-
-	// Generate interface code
-	interfaceTmpl, err := template.New("interface").Parse(interfaceTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse interface template: %w", err)
-	}
-
-	for _, i := range interfaces {
-		err = interfaceTmpl.Execute(&buffer, i)
+		err = interfaceTmpl.Execute(&buffer, tsInterface)
 		if err != nil {
 			return "", fmt.Errorf("failed to execute interface template: %w", err)
 		}
 		buffer.WriteString("\n")
 	}
+
+	// 2. Output class header and interceptor related code
+	buffer.WriteString("type RequestInterceptor = (config: any) => any | Promise<any>;\n")
+	buffer.WriteString("type ResponseInterceptor = (response: any) => any | Promise<any>;\n\n")
+	buffer.WriteString("export class CadenceService {\n")
+	buffer.WriteString("  private requestInterceptors: RequestInterceptor[] = [];\n")
+	buffer.WriteString("  private responseInterceptors: ResponseInterceptor[] = [];\n\n")
+
+	buffer.WriteString("  useRequestInterceptor(interceptor: RequestInterceptor) {\n    this.requestInterceptors.push(interceptor);\n  }\n\n")
+	buffer.WriteString("  useResponseInterceptor(interceptor: ResponseInterceptor) {\n    this.responseInterceptors.push(interceptor);\n  }\n\n")
+	buffer.WriteString("  private async runRequestInterceptors(config: any) {\n    let c = config;\n    for (const interceptor of this.requestInterceptors) {\n      c = await interceptor(c);\n    }\n    return c;\n  }\n\n")
+	buffer.WriteString("  private async runResponseInterceptors(response: any) {\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      r = await interceptor(r);\n    }\n    return r;\n  }\n\n")
 
 	// Generate functions for transactions
 	for filename, result := range g.Report.Transactions {
@@ -356,7 +408,6 @@ func (g *Generator) Generate() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
-
 	// First generate the base functions
 	err = tmpl.Execute(&buffer, struct {
 		Functions []TypeScriptFunction
@@ -368,7 +419,6 @@ func (g *Generator) Generate() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
-
 	// Then generate tagged functions in separate sections
 	for tag, tagFunctions := range taggedFunctions {
 		buffer.WriteString("\n")
@@ -383,6 +433,8 @@ func (g *Generator) Generate() (string, error) {
 			return "", fmt.Errorf("failed to execute template: %w", err)
 		}
 	}
+	// 4. Close class with single '}'
+	buffer.WriteString("}\n\n")
 
 	return buffer.String(), nil
 }
