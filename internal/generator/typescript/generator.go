@@ -111,7 +111,6 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
       cadence: code,
       name: "{{$func.Name}}",
       type: "script",
-      network: this.network,
       args: (arg: any, t: any) => [
         {{- range $func.Parameters}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
@@ -127,7 +126,6 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
       cadence: code,
       name: "{{$func.Name}}",
       type: "transaction",
-      network: this.network,
       args: (arg: any, t: any) => [
         {{- range $func.Parameters}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
@@ -278,7 +276,7 @@ func (g *Generator) Generate() (string, error) {
 
 	// Add header with imports
 	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n")
-	buffer.WriteString("import { send as httpSend } from \"@onflow/transport-http\";\n\n")
+	buffer.WriteString("import { Buffer } from 'buffer';\n\n")
 	buffer.WriteString("/** Utility function to decode Base64 Cadence code */\n")
 	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
 	buffer.WriteString("/** Generated from Cadence files */\n")
@@ -392,28 +390,11 @@ func (g *Generator) Generate() (string, error) {
 	buffer.WriteString("type RequestInterceptor = (config: any) => any | Promise<any>;\n")
 	buffer.WriteString("type ResponseInterceptor = (response: any) => any | Promise<any>;\n\n")
 	buffer.WriteString("export class CadenceService {\n")
-	buffer.WriteString("  private network: string;\n")
 	buffer.WriteString("  private requestInterceptors: RequestInterceptor[] = [];\n")
 	buffer.WriteString("  private responseInterceptors: ResponseInterceptor[] = [];\n\n")
 
 	// Insert constructor
-	buffer.WriteString("  constructor(network: \"mainnet\" | \"testnet\" = \"mainnet\") {\n")
-	buffer.WriteString("    this.network = network;\n")
-	buffer.WriteString("    if (network === \"mainnet\") {\n")
-	buffer.WriteString("      fcl.config()\n")
-	buffer.WriteString("        .put(\"flow.network\", \"mainnet\")\n")
-	buffer.WriteString("        .put(\"accessNode.api\", \"https://rest-mainnet.onflow.org\")\n")
-	buffer.WriteString("        .put(\"sdk.transport\", httpSend);\n")
-	buffer.WriteString("    } else {\n")
-	buffer.WriteString("      fcl.config()\n")
-	buffer.WriteString("        .put(\"flow.network\", \"testnet\")\n")
-	buffer.WriteString("        .put(\"accessNode.api\", \"https://rest-testnet.onflow.org\")\n")
-	buffer.WriteString("        .put(\"sdk.transport\", httpSend);\n")
-	buffer.WriteString("    }\n")
-	buffer.WriteString("    const addrMap = addresses[network];\n")
-	buffer.WriteString("    for (const key in addrMap) {\n")
-	buffer.WriteString("      fcl.config().put(key, addrMap[key]);\n")
-	buffer.WriteString("    }\n")
+	buffer.WriteString("  constructor() {\n")
 	buffer.WriteString("  }\n\n")
 
 	buffer.WriteString("  useRequestInterceptor(interceptor: RequestInterceptor) {\n    this.requestInterceptors.push(interceptor);\n  }\n\n")
