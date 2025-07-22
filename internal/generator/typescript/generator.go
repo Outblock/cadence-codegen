@@ -111,6 +111,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
       cadence: code,
       name: "{{$func.Name}}",
       type: "script",
+      network: this.network,
       args: (arg: any, t: any) => [
         {{- range $func.Parameters}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
@@ -126,6 +127,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
       cadence: code,
       name: "{{$func.Name}}",
       type: "transaction",
+      network: this.network,
       args: (arg: any, t: any) => [
         {{- range $func.Parameters}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
@@ -196,6 +198,15 @@ func getFCLType(cadenceType string) string {
 	return fmt.Sprintf("t.%s", cadenceType)
 }
 
+// Add a function to flatten nested struct names for interface naming
+func flattenStructName(name string) string {
+	if strings.Contains(name, ".") {
+		parts := strings.Split(name, ".")
+		return parts[0] + parts[1]
+	}
+	return name
+}
+
 // convertCadenceTypeToTypeScript converts a Cadence type to its TypeScript equivalent
 func convertCadenceTypeToTypeScript(cadenceType string) string {
 	// Check if it's an optional type
@@ -246,6 +257,10 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 	// For non-dictionary types, use the type mapping
 	tsType, ok := typeMapping[cadenceType]
 	if !ok {
+		// New: If it's a nested name, flatten it
+		if strings.Contains(cadenceType, ".") {
+			return flattenStructName(cadenceType)
+		}
 		return cadenceType
 	}
 	return tsType
@@ -262,7 +277,8 @@ func (g *Generator) Generate() (string, error) {
 	taggedFunctions := make(map[string][]TypeScriptFunction)
 
 	// Add header with imports
-	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n\n")
+	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n")
+	buffer.WriteString("import { send as httpSend } from \"@onflow/transport-http\";\n\n")
 	buffer.WriteString("/** Utility function to decode Base64 Cadence code */\n")
 	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
 	buffer.WriteString("/** Generated from Cadence files */\n")
@@ -309,9 +325,29 @@ func (g *Generator) Generate() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to parse interface template: %w", err)
 	}
+
+	// Group structs by contract name for nested types
+	contractStructs := make(map[string][]analyzer.Struct)
+	regularStructs := make([]analyzer.Struct, 0)
+
 	for _, composite := range g.Report.Structs {
+		if strings.Contains(composite.Name, ".") {
+			// This is a nested type, group by contract
+			parts := strings.Split(composite.Name, ".")
+			if len(parts) == 2 {
+				contractName := parts[0]
+				contractStructs[contractName] = append(contractStructs[contractName], composite)
+			}
+		} else {
+			// This is a regular struct
+			regularStructs = append(regularStructs, composite)
+		}
+	}
+
+	// Generate regular struct interfaces
+	for _, composite := range regularStructs {
 		tsInterface := TypeScriptInterface{
-			Name:   composite.Name,
+			Name:   flattenStructName(composite.Name),
 			Fields: make([]TypeScriptField, 0),
 		}
 		for _, field := range composite.Fields {
@@ -326,15 +362,59 @@ func (g *Generator) Generate() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to execute interface template: %w", err)
 		}
-		buffer.WriteString("\n")
+		buffer.WriteString("\n\n")
+	}
+
+	// Generate nested type interfaces as namespaces
+	for _, structs := range contractStructs {
+		for _, composite := range structs {
+			tsInterface := TypeScriptInterface{
+				Name:   flattenStructName(composite.Name),
+				Fields: make([]TypeScriptField, 0),
+			}
+			for _, field := range composite.Fields {
+				tsType := convertCadenceTypeToTypeScript(field.TypeStr)
+				tsInterface.Fields = append(tsInterface.Fields, TypeScriptField{
+					Name:     field.Name,
+					Type:     tsType,
+					Optional: field.Optional,
+				})
+			}
+			err = interfaceTmpl.Execute(&buffer, tsInterface)
+			if err != nil {
+				return "", fmt.Errorf("failed to execute interface template: %w", err)
+			}
+			buffer.WriteString("\n\n")
+		}
 	}
 
 	// 2. Output class header and interceptor related code
 	buffer.WriteString("type RequestInterceptor = (config: any) => any | Promise<any>;\n")
 	buffer.WriteString("type ResponseInterceptor = (response: any) => any | Promise<any>;\n\n")
 	buffer.WriteString("export class CadenceService {\n")
+	buffer.WriteString("  private network: string;\n")
 	buffer.WriteString("  private requestInterceptors: RequestInterceptor[] = [];\n")
 	buffer.WriteString("  private responseInterceptors: ResponseInterceptor[] = [];\n\n")
+
+	// Insert constructor
+	buffer.WriteString("  constructor(network: \"mainnet\" | \"testnet\" = \"mainnet\") {\n")
+	buffer.WriteString("    this.network = network;\n")
+	buffer.WriteString("    if (network === \"mainnet\") {\n")
+	buffer.WriteString("      fcl.config()\n")
+	buffer.WriteString("        .put(\"flow.network\", \"mainnet\")\n")
+	buffer.WriteString("        .put(\"accessNode.api\", \"https://rest-mainnet.onflow.org\")\n")
+	buffer.WriteString("        .put(\"sdk.transport\", httpSend);\n")
+	buffer.WriteString("    } else {\n")
+	buffer.WriteString("      fcl.config()\n")
+	buffer.WriteString("        .put(\"flow.network\", \"testnet\")\n")
+	buffer.WriteString("        .put(\"accessNode.api\", \"https://rest-testnet.onflow.org\")\n")
+	buffer.WriteString("        .put(\"sdk.transport\", httpSend);\n")
+	buffer.WriteString("    }\n")
+	buffer.WriteString("    const addrMap = addresses[network];\n")
+	buffer.WriteString("    for (const key in addrMap) {\n")
+	buffer.WriteString("      fcl.config().put(key, addrMap[key]);\n")
+	buffer.WriteString("    }\n")
+	buffer.WriteString("  }\n\n")
 
 	buffer.WriteString("  useRequestInterceptor(interceptor: RequestInterceptor) {\n    this.requestInterceptors.push(interceptor);\n  }\n\n")
 	buffer.WriteString("  useResponseInterceptor(interceptor: ResponseInterceptor) {\n    this.responseInterceptors.push(interceptor);\n  }\n\n")
@@ -379,6 +459,20 @@ func (g *Generator) Generate() (string, error) {
 
 		if result.ReturnType != "" {
 			tsType := convertCadenceTypeToTypeScript(result.ReturnType)
+			// Replace all function return type references
+			if strings.HasPrefix(tsType, "[") && strings.HasSuffix(tsType, "]") {
+				// 形如 [FlowIDTableStaking.DelegatorInfo] -> FlowIDTableStakingDelegatorInfo[]
+				inner := strings.TrimPrefix(strings.TrimSuffix(tsType, "]"), "[")
+				inner = flattenStructName(strings.TrimSpace(inner))
+				tsType = inner + "[]"
+			} else if strings.HasSuffix(tsType, "| undefined") {
+				// 形如 FlowIDTableStaking.DelegatorInfo | undefined
+				base := strings.TrimSuffix(tsType, "| undefined")
+				base = flattenStructName(strings.TrimSpace(base))
+				tsType = base + " | undefined"
+			} else {
+				tsType = flattenStructName(tsType)
+			}
 			tsFunction.ReturnType = tsType
 		}
 
@@ -434,7 +528,7 @@ func (g *Generator) Generate() (string, error) {
 		}
 	}
 	// 4. Close class with single '}'
-	buffer.WriteString("}\n\n")
+	buffer.WriteString("}\n")
 
 	return buffer.String(), nil
 }
