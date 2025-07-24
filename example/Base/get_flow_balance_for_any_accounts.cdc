@@ -11,7 +11,7 @@ access(all) fun getFlowBalance(_ address: String): UFix64? {
         // Use available balance instead of total balance
         return getAccount(account).availableBalance
     }
-    return nil
+    return 0.0
 }
 
 access(all) fun main(addresses: [String]): {String: UFix64?} {
