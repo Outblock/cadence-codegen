@@ -12,6 +12,8 @@ import (
 
 var (
 	includeBase64 bool
+	resolveNested bool
+	network       string
 )
 
 var analyzeCmd = &cobra.Command{
@@ -36,6 +38,16 @@ The output will be a JSON file containing the analysis result. If output is not 
 		err := a.AnalyzeDirectory(inputPath)
 		if err != nil {
 			return fmt.Errorf("failed to analyze directory: %w", err)
+		}
+
+		// Resolve nested types if requested
+		if resolveNested {
+			if network == "" {
+				network = "mainnet" // default to mainnet
+			}
+			if err := a.ResolveNestedTypes(network); err != nil {
+				fmt.Printf("Warning: failed to resolve nested types: %v\n", err)
+			}
 		}
 
 		// Create output directory if it doesn't exist
@@ -65,5 +77,7 @@ The output will be a JSON file containing the analysis result. If output is not 
 
 func init() {
 	analyzeCmd.Flags().BoolVar(&includeBase64, "base64", true, "Include base64-encoded Cadence files in the output")
+	analyzeCmd.Flags().BoolVar(&resolveNested, "resolve-nested", true, "Resolve nested types by fetching contracts from chain")
+	analyzeCmd.Flags().StringVar(&network, "network", "mainnet", "Network to use for resolving nested types (mainnet/testnet)")
 	rootCmd.AddCommand(analyzeCmd)
 }

@@ -10,7 +10,7 @@ import FungibleTokenMetadataViews from 0xFungibleTokenMetadataViews
 
 
 
-transaction(vaultIdentifier:String, address: Address, path: String, amount: UFix64 ) {
+transaction(vaultIdentifier:String, sender: Address, amount: UFix64 ) {
 
   prepare(signer: auth(Storage) &Account) {
     let type = CompositeType(vaultIdentifier)
@@ -24,7 +24,7 @@ transaction(vaultIdentifier:String, address: Address, path: String, amount: UFix
     // get the manager resource and borrow childAccount
     let m = signer.storage.borrow<auth(HybridCustody.Manage) &HybridCustody.Manager>(from: HybridCustody.ManagerStoragePath)
         ?? panic("manager does not exist")
-    let childAcct = m.borrowAccount(addr: address) ?? panic("child account not found")
+    let childAcct = m.borrowAccount(addr: sender) ?? panic("child account not found")
     
     let vaultData = viewResolver.resolveContractView(resourceType: nil, viewType: Type<FungibleTokenMetadataViews.FTVaultData>()) as! FungibleTokenMetadataViews.FTVaultData?
         ?? panic("Could not get the vault data view for <Token> ")
