@@ -211,6 +211,10 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 	if strings.HasSuffix(cadenceType, "?") {
 		baseType := strings.TrimSuffix(cadenceType, "?")
 		tsType := convertCadenceTypeToTypeScript(baseType)
+		// For UFix64 and Fix64, use string? instead of string | undefined
+		if baseType == "UFix64" || baseType == "Fix64" {
+			return "string?"
+		}
 		return fmt.Sprintf("%s | undefined", tsType)
 	}
 
@@ -220,11 +224,8 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
 		elementType = strings.TrimSpace(elementType)
 
-		// Convert element type using type mapping
-		tsElementType, ok := typeMapping[elementType]
-		if !ok {
-			tsElementType = elementType
-		}
+		// Convert element type recursively
+		tsElementType := convertCadenceTypeToTypeScript(elementType)
 
 		return fmt.Sprintf("%s[]", tsElementType)
 	}
@@ -238,15 +239,9 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 			keyType := strings.TrimSpace(parts[0])
 			valueType := strings.TrimSpace(parts[1])
 
-			// Convert key and value types
-			tsKeyType, ok := typeMapping[keyType]
-			if !ok {
-				tsKeyType = keyType
-			}
-			tsValueType, ok := typeMapping[valueType]
-			if !ok {
-				tsValueType = valueType
-			}
+			// Convert key and value types recursively
+			tsKeyType := convertCadenceTypeToTypeScript(keyType)
+			tsValueType := convertCadenceTypeToTypeScript(valueType)
 
 			return fmt.Sprintf("Record<%s, %s>", tsKeyType, tsValueType)
 		}
