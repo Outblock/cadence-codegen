@@ -50,8 +50,8 @@ var typeMapping = map[string]string{
 	"Int256":    "string",
 	"Bool":      "boolean",
 	"Address":   "string",
-	"UFix64":    "number",
-	"Fix64":     "number",
+	"UFix64":    "string",
+	"Fix64":     "string",
 	"AnyStruct": "any",
 }
 
