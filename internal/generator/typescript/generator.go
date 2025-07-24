@@ -167,6 +167,12 @@ func formatFunctionName(filename string) string {
 
 // getFCLType gets the FCL type annotation for a Cadence type
 func getFCLType(cadenceType string) string {
+	// Check if it's an optional type - strip the ? for FCL type
+	if strings.HasSuffix(cadenceType, "?") {
+		baseType := strings.TrimSuffix(cadenceType, "?")
+		return getFCLType(baseType)
+	}
+
 	// Check if it's an array type
 	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
 		// Extract element type
@@ -211,10 +217,6 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 	if strings.HasSuffix(cadenceType, "?") {
 		baseType := strings.TrimSuffix(cadenceType, "?")
 		tsType := convertCadenceTypeToTypeScript(baseType)
-		// For UFix64 and Fix64, use string? instead of string | undefined
-		if baseType == "UFix64" || baseType == "Fix64" {
-			return "string?"
-		}
 		return fmt.Sprintf("%s | undefined", tsType)
 	}
 
