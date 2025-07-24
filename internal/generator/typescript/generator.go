@@ -167,6 +167,12 @@ func formatFunctionName(filename string) string {
 
 // getFCLType gets the FCL type annotation for a Cadence type
 func getFCLType(cadenceType string) string {
+	// Check if it's an optional type - strip the ? for FCL type
+	if strings.HasSuffix(cadenceType, "?") {
+		baseType := strings.TrimSuffix(cadenceType, "?")
+		return getFCLType(baseType)
+	}
+
 	// Check if it's an array type
 	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
 		// Extract element type
@@ -220,11 +226,8 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
 		elementType = strings.TrimSpace(elementType)
 
-		// Convert element type using type mapping
-		tsElementType, ok := typeMapping[elementType]
-		if !ok {
-			tsElementType = elementType
-		}
+		// Convert element type recursively
+		tsElementType := convertCadenceTypeToTypeScript(elementType)
 
 		return fmt.Sprintf("%s[]", tsElementType)
 	}
@@ -238,15 +241,9 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 			keyType := strings.TrimSpace(parts[0])
 			valueType := strings.TrimSpace(parts[1])
 
-			// Convert key and value types
-			tsKeyType, ok := typeMapping[keyType]
-			if !ok {
-				tsKeyType = keyType
-			}
-			tsValueType, ok := typeMapping[valueType]
-			if !ok {
-				tsValueType = valueType
-			}
+			// Convert key and value types recursively
+			tsKeyType := convertCadenceTypeToTypeScript(keyType)
+			tsValueType := convertCadenceTypeToTypeScript(valueType)
 
 			return fmt.Sprintf("Record<%s, %s>", tsKeyType, tsValueType)
 		}
