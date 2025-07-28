@@ -116,6 +116,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
+	  	limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let result = await fcl.query(config);
@@ -131,6 +132,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
+	  	limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let txId = await fcl.mutate(config);
