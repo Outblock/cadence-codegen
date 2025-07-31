@@ -5,7 +5,7 @@ import MetadataViews from 0xMetadataViews
 import ViewResolver from 0xMetadataViews
 
 
-transaction(identifier: String,childAddr: Address, receiver: Address, ids: [UInt64]) {
+transaction(identifier: String, childAddr: Address, receiver: Address, ids: [UInt64]) {
   prepare(signer: auth(Storage) &Account) {
     let type = CompositeType(identifier)
     let identifierSplit = identifier.split(separator: ".")

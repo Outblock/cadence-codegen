@@ -1,6 +1,7 @@
 import NonFungibleToken from 0xNonFungibleToken
 import StorageRent from 0xStorageRent
 import ViewResolver from 0xMetadataViews
+import MetadataViews from 0xMetadataViews
 
 
 

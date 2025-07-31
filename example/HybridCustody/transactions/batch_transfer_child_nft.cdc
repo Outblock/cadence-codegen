@@ -5,7 +5,7 @@ import MetadataViews from 0xMetadataViews
 import ViewResolver from 0xMetadataViews
 
 
-transaction(identifier: String, address: Address, ids: [UInt64] ) {
+transaction(identifier: String, childAddr: Address, ids: [UInt64] ) {
 
   prepare(signer: auth(Storage) &Account) {
     let type = CompositeType(identifier)
@@ -19,7 +19,7 @@ transaction(identifier: String, address: Address, ids: [UInt64] ) {
     // get the manager resource and borrow childAccount
     let m = signer.storage.borrow<auth(HybridCustody.Manage) &HybridCustody.Manager>(from: HybridCustody.ManagerStoragePath)
         ?? panic("manager does not exist")
-    let childAcct = m.borrowAccount(addr: address) ?? panic("child account not found")
+    let childAcct = m.borrowAccount(addr: childAddr) ?? panic("child account not found")
     
     let collectionData = viewResolver.resolveContractView(resourceType: nil, viewType: Type<MetadataViews.NFTCollectionData>()) as! MetadataViews.NFTCollectionData?
         ?? panic("Could not get the vault data view for <NFT> ")
