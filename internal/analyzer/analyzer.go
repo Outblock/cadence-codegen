@@ -91,6 +91,51 @@ func New() *Analyzer {
 }
 
 // GetReport returns the current analysis report
+// flattenStructName flattens nested struct names by removing dots
+func flattenStructName(name string) string {
+	if strings.Contains(name, ".") {
+		parts := strings.Split(name, ".")
+		result := ""
+		for _, part := range parts {
+			result += part
+		}
+		return result
+	}
+	return name
+}
+
+// flattenReturnType flattens nested type references in return types
+func flattenReturnType(returnType string) string {
+	// Handle array types like "[FlowIDTableStaking.DelegatorInfo]?"
+	if strings.HasPrefix(returnType, "[") && strings.HasSuffix(returnType, "]") {
+		// Extract the inner type
+		innerType := strings.TrimPrefix(strings.TrimSuffix(returnType, "]"), "[")
+		// Check if it has optional marker
+		hasOptional := strings.HasSuffix(innerType, "?")
+		if hasOptional {
+			innerType = strings.TrimSuffix(innerType, "?")
+		}
+		// Flatten the inner type
+		flattenedInner := flattenStructName(innerType)
+		// Reconstruct the type
+		result := "[" + flattenedInner + "]"
+		if hasOptional {
+			result += "?"
+		}
+		return result
+	}
+
+	// Handle optional types like "FlowIDTableStaking.DelegatorInfo?"
+	if strings.HasSuffix(returnType, "?") {
+		baseType := strings.TrimSuffix(returnType, "?")
+		flattenedBase := flattenStructName(baseType)
+		return flattenedBase + "?"
+	}
+
+	// Handle simple types
+	return flattenStructName(returnType)
+}
+
 func (a *Analyzer) GetReport() *Report {
 	var addresses map[string]interface{}
 	if a.AddressesPath != "" {
@@ -105,10 +150,20 @@ func (a *Analyzer) GetReport() *Report {
 			}
 		}
 	}
+
+	// Flatten struct names in the report
+	flattenedStructs := make(map[string]Struct)
+	for key, structDef := range a.Structs {
+		flattenedKey := flattenStructName(key)
+		flattenedStruct := structDef
+		flattenedStruct.Name = flattenStructName(structDef.Name)
+		flattenedStructs[flattenedKey] = flattenedStruct
+	}
+
 	return &Report{
 		Transactions:  a.Transactions,
 		Scripts:       a.Scripts,
-		Structs:       a.Structs,
+		Structs:       flattenedStructs,
 		Addresses:     addresses,
 		IncludeBase64: a.IncludeBase64,
 	}
