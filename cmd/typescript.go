@@ -54,6 +54,17 @@ The output will be a TypeScript file (defaults to CadenceGen.ts if not specified
 				return fmt.Errorf("failed to analyze input: %w", err)
 			}
 
+			// Resolve nested types if addresses are available
+			if a.GetReport().Addresses != nil {
+				// Try to resolve nested types for both mainnet and testnet
+				if err := a.ResolveNestedTypes("mainnet"); err != nil {
+					fmt.Printf("Warning: failed to resolve nested types for mainnet: %v\n", err)
+				}
+				if err := a.ResolveNestedTypes("testnet"); err != nil {
+					fmt.Printf("Warning: failed to resolve nested types for testnet: %v\n", err)
+				}
+			}
+
 			report = a.GetReport()
 		}
 
