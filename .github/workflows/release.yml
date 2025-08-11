@@ -50,6 +50,67 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
         
+      - name: Download release assets
+        run: |
+          mkdir -p binaries
+          
+          # Wait a moment for release assets to be fully available
+          sleep 10
+          
+          # Download binaries from the release
+          gh release download v${{ steps.get_version.outputs.VERSION }} \
+            --pattern "cadence-codegen_Darwin_x86_64.tar.gz" \
+            --pattern "cadence-codegen_Darwin_arm64.tar.gz" \
+            --pattern "cadence-codegen_Linux_x86_64.tar.gz" \
+            --pattern "cadence-codegen_Linux_arm64.tar.gz" \
+            --pattern "cadence-codegen_Windows_x86_64.zip" \
+            --dir binaries/
+            
+          # Verify all files were downloaded
+          ls -la binaries/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+      - name: Extract and organize binaries
+        run: |
+          cd binaries
+          
+          # Extract Darwin x86_64
+          echo "Extracting Darwin x86_64..."
+          tar -xzf cadence-codegen_Darwin_x86_64.tar.gz
+          mkdir -p ../bin/darwin-x64
+          mv cadence-codegen ../bin/darwin-x64/cadence-codegen
+          
+          # Extract Darwin arm64
+          echo "Extracting Darwin arm64..."
+          tar -xzf cadence-codegen_Darwin_arm64.tar.gz
+          mkdir -p ../bin/darwin-arm64
+          mv cadence-codegen ../bin/darwin-arm64/cadence-codegen
+          
+          # Extract Linux x86_64
+          echo "Extracting Linux x86_64..."
+          tar -xzf cadence-codegen_Linux_x86_64.tar.gz
+          mkdir -p ../bin/linux-x64
+          mv cadence-codegen ../bin/linux-x64/cadence-codegen
+          
+          # Extract Linux arm64
+          echo "Extracting Linux arm64..."
+          tar -xzf cadence-codegen_Linux_arm64.tar.gz
+          mkdir -p ../bin/linux-arm64
+          mv cadence-codegen ../bin/linux-arm64/cadence-codegen
+          
+          # Extract Windows x86_64
+          echo "Extracting Windows x86_64..."
+          mkdir -p ../bin/win32-x64
+          unzip -j cadence-codegen_Windows_x86_64.zip -d ../bin/win32-x64/
+          
+          # Make binaries executable
+          chmod +x ../bin/*/cadence-codegen*
+          
+          # Verify all binaries were extracted
+          echo "Verifying extracted binaries..."
+          ls -la ../bin/*/
+        
       - name: Update package.json version
         run: |
           npm version ${{ steps.get_version.outputs.VERSION }} --no-git-tag-version

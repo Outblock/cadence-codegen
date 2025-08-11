@@ -4,44 +4,92 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-function findBinary() {
-  // First try the downloaded binary
-  const downloadedBinary = path.join(__dirname, 'cadence-codegen');
-  if (fs.existsSync(downloadedBinary)) {
-    return downloadedBinary;
+function getPlatformBinary() {
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  // Map Node.js platform/arch to our binary directory structure
+  const platformMap = {
+    'darwin': 'darwin',
+    'linux': 'linux',
+    'win32': 'win32'
+  };
+  
+  const archMap = {
+    'x64': 'x64',
+    'arm64': 'arm64'
+  };
+  
+  const mappedPlatform = platformMap[platform];
+  const mappedArch = archMap[arch];
+  
+  if (!mappedPlatform || !mappedArch) {
+    throw new Error(`Unsupported platform: ${platform}-${arch}`);
   }
   
-  // Fallback to system PATH
-  return 'cadence-codegen';
+  const binaryName = platform === 'win32' ? 'cadence-codegen.exe' : 'cadence-codegen';
+  const binaryPath = path.join(__dirname, `${mappedPlatform}-${mappedArch}`, binaryName);
+  
+  return binaryPath;
 }
 
 function main() {
-  const binary = findBinary();
-  const args = process.argv.slice(2);
-  
-  const child = spawn(binary, args, {
-    stdio: 'inherit',
-    windowsHide: false,
-  });
-  
-  child.on('error', (error) => {
-    if (error.code === 'ENOENT') {
-      console.error('❌ cadence-codegen binary not found.');
-      console.error('Please run: npm install');
-      process.exit(1);
-    } else {
+  try {
+    const binary = getPlatformBinary();
+    
+    if (!fs.existsSync(binary)) {
+      console.error(`❌ Binary not found: ${binary}`);
+      console.error('This may indicate a packaging issue or unsupported platform.');
+      console.error('Falling back to system PATH...');
+      
+      // Fallback to system binary
+      const args = process.argv.slice(2);
+      const child = spawn('cadence-codegen', args, {
+        stdio: 'inherit',
+        windowsHide: false,
+      });
+      
+      child.on('error', (error) => {
+        console.error('❌ System binary also not found. Please install cadence-codegen:');
+        console.error('  brew install cadence-codegen');
+        console.error('  or go install github.com/outblock/cadence-codegen@latest');
+        process.exit(1);
+      });
+      
+      child.on('exit', (code, signal) => {
+        if (signal) {
+          process.kill(process.pid, signal);
+        } else {
+          process.exit(code || 0);
+        }
+      });
+      
+      return;
+    }
+    
+    const args = process.argv.slice(2);
+    const child = spawn(binary, args, {
+      stdio: 'inherit',
+      windowsHide: false,
+    });
+    
+    child.on('error', (error) => {
       console.error('Error executing cadence-codegen:', error.message);
       process.exit(1);
-    }
-  });
-  
-  child.on('exit', (code, signal) => {
-    if (signal) {
-      process.kill(process.pid, signal);
-    } else {
-      process.exit(code || 0);
-    }
-  });
+    });
+    
+    child.on('exit', (code, signal) => {
+      if (signal) {
+        process.kill(process.pid, signal);
+      } else {
+        process.exit(code || 0);
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌', error.message);
+    process.exit(1);
+  }
 }
 
 if (require.main === module) {
