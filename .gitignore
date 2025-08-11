@@ -34,4 +34,4 @@ Thumbs.db # Added by goreleaser init:
 dist/
 /generated
 cadence.json
-CadenceGen.ts
+cadence.generated.ts

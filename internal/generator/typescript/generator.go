@@ -120,8 +120,8 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
     };
     config = await this.runRequestInterceptors(config);
     let response = await fcl.query(config);
-    response = await this.runResponseInterceptors(config, response);
-    return response;
+    const result = await this.runResponseInterceptors(config, response);
+    return result.response;
     {{- else}}
     let config = {
       cadence: code,
@@ -136,8 +136,8 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
     };
     config = await this.runRequestInterceptors(config);
     let txId = await fcl.mutate(config);
-    txId = await this.runResponseInterceptors(config, txId);
-    return txId;
+    const result = await this.runResponseInterceptors(config, txId);
+    return result.response;
     {{- end}}
   }
 {{- end}}`
@@ -392,7 +392,7 @@ func (g *Generator) Generate() (string, error) {
 
 	// 2. Output class header and interceptor related code
 	buffer.WriteString("type RequestInterceptor = (config: any) => any | Promise<any>;\n")
-	buffer.WriteString("type ResponseInterceptor = (config: any, response: any) => any | Promise<any>;\n\n")
+	buffer.WriteString("type ResponseInterceptor = (config: any, response: any) => { config: any; response: any } | Promise<{ config: any; response: any }>;\n\n")
 	buffer.WriteString("export class CadenceService {\n")
 	buffer.WriteString("  private requestInterceptors: RequestInterceptor[] = [];\n")
 	buffer.WriteString("  private responseInterceptors: ResponseInterceptor[] = [];\n\n")
@@ -404,7 +404,7 @@ func (g *Generator) Generate() (string, error) {
 	buffer.WriteString("  useRequestInterceptor(interceptor: RequestInterceptor) {\n    this.requestInterceptors.push(interceptor);\n  }\n\n")
 	buffer.WriteString("  useResponseInterceptor(interceptor: ResponseInterceptor) {\n    this.responseInterceptors.push(interceptor);\n  }\n\n")
 	buffer.WriteString("  private async runRequestInterceptors(config: any) {\n    let c = config;\n    for (const interceptor of this.requestInterceptors) {\n      c = await interceptor(c);\n    }\n    return c;\n  }\n\n")
-	buffer.WriteString("  private async runResponseInterceptors(config: any, response: any) {\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      r = await interceptor(config, r);\n    }\n    return r;\n  }\n\n")
+	buffer.WriteString("  private async runResponseInterceptors(config: any, response: any) {\n    let c = config;\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      const result = await interceptor(c, r);\n      c = result.config;\n      r = result.response;\n    }\n    return { config: c, response: r };\n  }\n\n")
 
 	// Generate functions for transactions
 	for filename, result := range g.Report.Transactions {
