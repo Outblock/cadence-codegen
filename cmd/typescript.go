@@ -47,6 +47,7 @@ The output will be a TypeScript file (defaults to cadence.generated.ts if not sp
 		} else {
 			// Create analyzer for Cadence files
 			a := analyzer.New()
+			a.SetIncludeBase64(true) // Always include base64 for TypeScript generation
 
 			// Analyze directory or file
 			err := a.AnalyzeDirectory(inputPath)

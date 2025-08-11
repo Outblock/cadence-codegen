@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -105,10 +106,12 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
 {{if $index}}
 
 {{end}}  public async {{$func.Name}}({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} {
-    const code = decodeCadence("{{$func.Base64}}");
+    const code = ` + "`" + `
+{{$func.Base64}}
+` + "`" + `;
     {{- if eq $func.Type "query"}}
     let config = {
-      cadence: code,
+      cadence: code.trim(),
       name: "{{$func.Name}}",
       type: "script",
       args: (arg: any, t: any) => [
@@ -116,7 +119,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
-	  	limit: 9999,
+      limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let response = await fcl.query(config);
@@ -124,7 +127,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
     return result.response;
     {{- else}}
     let config = {
-      cadence: code,
+      cadence: code.trim(),
       name: "{{$func.Name}}",
       type: "transaction",
       args: (arg: any, t: any) => [
@@ -132,7 +135,7 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
-	  limit: 9999,
+      limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let txId = await fcl.mutate(config);
@@ -141,6 +144,20 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
     {{- end}}
   }
 {{- end}}`
+
+// decodeBase64ToUTF8 decodes base64 string to UTF-8 string and formats it
+func decodeBase64ToUTF8(base64Str string) string {
+	if base64Str == "" {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(base64Str)
+	if err != nil {
+		return ""
+	}
+	// Trim whitespace and format the code
+	code := strings.TrimSpace(string(decoded))
+	return code
+}
 
 // formatFunctionName formats the filename into a valid TypeScript function name
 func formatFunctionName(filename string) string {
@@ -279,10 +296,7 @@ func (g *Generator) Generate() (string, error) {
 	taggedFunctions := make(map[string][]TypeScriptFunction)
 
 	// Add header with imports
-	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n")
-	buffer.WriteString("import { Buffer } from 'buffer';\n\n")
-	buffer.WriteString("/** Utility function to decode Base64 Cadence code */\n")
-	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
+	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n\n")
 	buffer.WriteString("/** Generated from Cadence files */\n")
 
 	// 1. Output all interfaces/types (including composite types)
@@ -411,7 +425,7 @@ func (g *Generator) Generate() (string, error) {
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
-			Base64:     result.Base64,
+			Base64:     decodeBase64ToUTF8(result.Base64),
 			Type:       "transaction",
 		}
 
@@ -438,7 +452,7 @@ func (g *Generator) Generate() (string, error) {
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
-			Base64:     result.Base64,
+			Base64:     decodeBase64ToUTF8(result.Base64),
 			Type:       "query",
 		}
 
