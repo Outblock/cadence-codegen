@@ -4,11 +4,27 @@ A tool for analyzing Cadence smart contracts and generating code. It extracts tr
 
 ## Installation
 
+### Using npm (Recommended)
+
+```bash
+# Global installation
+npm install -g @outblock/cadence-codegen
+
+# Or use in a project
+npm install @outblock/cadence-codegen
+npx cadence-codegen --help
+```
+
 ### Using Homebrew
 
 ```bash
 brew tap outblock/tap
 brew install cadence-codegen
+```
+
+### Update Homebrew
+```bash
+brew update && brew upgrade cadence-codegen
 ```
 
 ### Using Go
@@ -176,6 +192,34 @@ const result = await service.getAddr(flowAddress);
 
 // Send a transaction
 const txId = await service.createCoa(amount);
+```
+
+## NPM Integration
+
+When installed via npm, the tool automatically downloads the appropriate binary for your platform (macOS, Linux, Windows) during installation. This provides a seamless experience for JavaScript/TypeScript developers who want to integrate Cadence code generation into their build processes.
+
+### Use in package.json scripts
+
+```json
+{
+  "scripts": {
+    "codegen": "cadence-codegen typescript ./cadence output.ts",
+    "build": "npm run codegen && tsc"
+  }
+}
+```
+
+### Use programmatically
+
+```javascript
+const { execSync } = require('child_process');
+
+// Generate TypeScript code
+execSync('cadence-codegen typescript ./contracts generated.ts');
+
+// Or analyze contracts
+const analysis = execSync('cadence-codegen analyze ./contracts', { encoding: 'utf8' });
+console.log(JSON.parse(analysis));
 ```
 
 ## License
