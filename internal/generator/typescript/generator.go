@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -102,7 +103,9 @@ export interface {{.Name}} {
 {{- end}}
 }`
 
-const functionTemplate = `{{- range $index, $func := .Functions}}
+const functionTemplate = `{{- if .Tag}}
+  // Tag: {{.Tag}}
+{{- end}}{{range $index, $func := .Functions}}
 {{if $index}}
 
 {{end}}  public async {{$func.Name}}({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} {
@@ -381,6 +384,11 @@ func (g *Generator) Generate() (string, error) {
 		}
 	}
 
+	// Sort regular structs by name for consistent ordering
+	sort.Slice(regularStructs, func(i, j int) bool {
+		return flattenStructName(regularStructs[i].Name) < flattenStructName(regularStructs[j].Name)
+	})
+
 	// Generate regular struct interfaces
 	for _, composite := range regularStructs {
 		tsInterface := TypeScriptInterface{
@@ -402,8 +410,21 @@ func (g *Generator) Generate() (string, error) {
 		buffer.WriteString("\n\n")
 	}
 
+	// Sort contract names for consistent ordering of nested types
+	var contractNames []string
+	for contractName := range contractStructs {
+		contractNames = append(contractNames, contractName)
+	}
+	sort.Strings(contractNames)
+
 	// Generate nested type interfaces as namespaces
-	for _, structs := range contractStructs {
+	for _, contractName := range contractNames {
+		structs := contractStructs[contractName]
+		// Sort structs within each contract by name
+		sort.Slice(structs, func(i, j int) bool {
+			return flattenStructName(structs[i].Name) < flattenStructName(structs[j].Name)
+		})
+
 		for _, composite := range structs {
 			tsInterface := TypeScriptInterface{
 				Name:   flattenStructName(composite.Name),
@@ -442,7 +463,15 @@ func (g *Generator) Generate() (string, error) {
 	buffer.WriteString("  private async runResponseInterceptors(config: any, response: any) {\n    let c = config;\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      const result = await interceptor(c, r);\n      c = result.config;\n      r = result.response;\n    }\n    return { config: c, response: r };\n  }\n\n")
 
 	// Generate functions for transactions
-	for filename, result := range g.Report.Transactions {
+	// First collect all transaction filenames and sort them
+	var transactionFilenames []string
+	for filename := range g.Report.Transactions {
+		transactionFilenames = append(transactionFilenames, filename)
+	}
+	sort.Strings(transactionFilenames)
+
+	for _, filename := range transactionFilenames {
+		result := g.Report.Transactions[filename]
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
@@ -469,7 +498,15 @@ func (g *Generator) Generate() (string, error) {
 	}
 
 	// Generate functions for scripts
-	for filename, result := range g.Report.Scripts {
+	// First collect all script filenames and sort them
+	var scriptFilenames []string
+	for filename := range g.Report.Scripts {
+		scriptFilenames = append(scriptFilenames, filename)
+	}
+	sort.Strings(scriptFilenames)
+
+	for _, filename := range scriptFilenames {
+		result := g.Report.Scripts[filename]
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
@@ -489,7 +526,7 @@ func (g *Generator) Generate() (string, error) {
 				// 形如 FlowIDTableStaking.DelegatorInfo | undefined
 				base := strings.TrimSuffix(tsType, "| undefined")
 				base = flattenStructName(strings.TrimSpace(base))
-				tsType = base + " | undefined"
+				tsType = base + "| undefined"
 			} else {
 				tsType = flattenStructName(tsType)
 			}
@@ -514,6 +551,24 @@ func (g *Generator) Generate() (string, error) {
 		}
 	}
 
+	// Sort functions by name for consistent ordering
+	sort.Slice(functions, func(i, j int) bool {
+		return functions[i].Name < functions[j].Name
+	})
+
+	// Sort tagged functions by tag name and then by function name within each tag
+	var tagNames []string
+	for tag := range taggedFunctions {
+		tagNames = append(tagNames, tag)
+	}
+	sort.Strings(tagNames)
+
+	for _, tag := range tagNames {
+		sort.Slice(taggedFunctions[tag], func(i, j int) bool {
+			return taggedFunctions[tag][i].Name < taggedFunctions[tag][j].Name
+		})
+	}
+
 	// Generate functions
 	funcMap := template.FuncMap{
 		"getFCLType": getFCLType,
@@ -534,7 +589,8 @@ func (g *Generator) Generate() (string, error) {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 	// Then generate tagged functions in separate sections
-	for tag, tagFunctions := range taggedFunctions {
+	for _, tag := range tagNames {
+		tagFunctions := taggedFunctions[tag]
 		buffer.WriteString("\n")
 		err = tmpl.Execute(&buffer, struct {
 			Functions []TypeScriptFunction
