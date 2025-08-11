@@ -601,12 +601,11 @@ func (a *Analyzer) ResolveNestedTypes(network string) error {
 	// Collect all nested type references that are actually used
 	nestedTypes := make(map[string]map[string]bool) // contract -> set of struct names
 
-	// Check in scripts for nested references
-	for _, script := range a.Scripts {
-		if strings.Contains(script.ReturnType, ".") {
-			// Extract contract name and struct name from return type like "[FlowIDTableStaking.DelegatorInfo]?"
+	// Helper function to extract nested types from a type string
+	extractNestedTypes := func(typeStr string) {
+		if strings.Contains(typeStr, ".") {
 			// Remove array brackets and optional markers first
-			cleanType := strings.TrimSuffix(strings.TrimSuffix(script.ReturnType, "?"), "]")
+			cleanType := strings.TrimSuffix(strings.TrimSuffix(typeStr, "?"), "]")
 			cleanType = strings.TrimPrefix(cleanType, "[")
 			if strings.Contains(cleanType, ".") {
 				parts := strings.Split(cleanType, ".")
@@ -622,23 +621,20 @@ func (a *Analyzer) ResolveNestedTypes(network string) error {
 		}
 	}
 
+	// Check in scripts for nested references
+	for _, script := range a.Scripts {
+		extractNestedTypes(script.ReturnType)
+	}
+
 	// Check in transactions for nested references
 	for _, transaction := range a.Transactions {
-		if strings.Contains(transaction.ReturnType, ".") {
-			// Extract contract name and struct name from return type
-			cleanType := strings.TrimSuffix(strings.TrimSuffix(transaction.ReturnType, "?"), "]")
-			cleanType = strings.TrimPrefix(cleanType, "[")
-			if strings.Contains(cleanType, ".") {
-				parts := strings.Split(cleanType, ".")
-				if len(parts) == 2 {
-					contractName := parts[0]
-					structName := parts[1]
-					if nestedTypes[contractName] == nil {
-						nestedTypes[contractName] = make(map[string]bool)
-					}
-					nestedTypes[contractName][structName] = true
-				}
-			}
+		extractNestedTypes(transaction.ReturnType)
+	}
+
+	// Check in structs for nested references
+	for _, structDef := range a.Structs {
+		for _, field := range structDef.Fields {
+			extractNestedTypes(field.TypeStr)
 		}
 	}
 
