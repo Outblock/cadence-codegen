@@ -1,0 +1,18 @@
+# Go source files
+*.go
+go.mod
+go.sum
+main.go
+cmd/
+internal/
+
+# Build artifacts
+dist/
+
+# Development files
+.git/
+.gitignore
+example/
+
+# Documentation that's not needed in npm package
+LICENSE

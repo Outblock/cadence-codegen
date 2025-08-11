@@ -1,0 +1,46 @@
+{
+  "name": "@outblock/cadence-codegen",
+  "version": "1.0.0",
+  "description": "A tool for analyzing Cadence smart contracts and generating code",
+  "bin": {
+    "cadence-codegen": "./bin/cadence-codegen"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node lib/install.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cadence",
+    "flow",
+    "blockchain",
+    "codegen",
+    "smart-contracts"
+  ],
+  "author": "Outblock",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/outblock/cadence-codegen.git"
+  },
+  "homepage": "https://github.com/outblock/cadence-codegen",
+  "engines": {
+    "node": ">=14"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "dependencies": {
+    "tar": "^6.2.0"
+  }
+}
