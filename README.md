@@ -49,6 +49,21 @@ cadence-codegen swift ./contracts output.swift
 cadence-codegen swift analysis.json output.swift
 ```
 
+### Generate TypeScript Code
+
+Generate TypeScript code from Cadence files or JSON:
+
+```bash
+# Generate from Cadence files (outputs to cadence.generated.ts)
+cadence-codegen typescript ./contracts
+
+# Generate from Cadence files with custom output path
+cadence-codegen typescript ./contracts output.ts
+
+# Generate from previously analyzed JSON
+cadence-codegen typescript analysis.json output.ts
+```
+
 ## Features
 
 - Analyzes Cadence files (.cdc)
@@ -60,6 +75,7 @@ cadence-codegen swift analysis.json output.swift
 - Generates:
   - Structured JSON output
   - Swift code with type-safe wrappers
+  - TypeScript code with FCL integration
 - Supports folder-based tagging for better organization
 - Base64 encoding of Cadence files (optional)
 
@@ -99,6 +115,7 @@ cadence-codegen swift analysis.json output.swift
 ## Generated Swift Code
 
 The generated Swift code includes:
+
 - Type-safe enums for transactions and scripts
   - Separate enums for each folder (e.g., `CadenceGen.EVM` for files in the EVM folder)
   - Main `CadenceGen` enum for files in the root directory
@@ -120,11 +137,47 @@ let result: String? = try await flow.query(CadenceGen.getAddr(flowAddress: addre
 let txId = try await flow.sendTx(
     CadenceGen.EVM.createCoa(amount: amount),
     singers: [signer]
-) { 
+) {
     // Transaction build options
 }
 ```
 
+## Generated TypeScript Code
+
+The generated TypeScript code includes:
+
+- Type-safe functions for transactions and scripts
+- FCL (Flow Client Library) integration
+- Support for request and response interceptors
+- Automatic type conversion from Cadence to TypeScript
+- Support for async/await
+- Struct definitions with proper TypeScript interfaces
+
+Example usage of generated TypeScript code:
+
+```typescript
+import { CadenceService } from "./cadence.generated";
+
+const service = new CadenceService();
+
+// Add interceptors for request/response processing
+service.useRequestInterceptor((config) => {
+  console.log("Request config:", config);
+  return config;
+});
+
+service.useResponseInterceptor((config, response) => {
+  console.log("Response:", response);
+  return { config, response };
+});
+
+// Execute a script
+const result = await service.getAddr(flowAddress);
+
+// Send a transaction
+const txId = await service.createCoa(amount);
+```
+
 ## License
 
-MIT License 
+MIT License

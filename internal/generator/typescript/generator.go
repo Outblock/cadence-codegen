@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -105,10 +106,12 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
 {{if $index}}
 
 {{end}}  public async {{$func.Name}}({{range $index, $param := $func.Parameters}}{{if $index}}, {{end}}{{$param.Name}}{{if $param.Optional}}?{{end}}: {{$param.Type}}{{end}}){{if $func.ReturnType}}: Promise<{{$func.ReturnType}}>{{end}} {
-    const code = decodeCadence("{{$func.Base64}}");
+    const code = ` + "`" + `
+{{$func.Base64}}
+` + "`" + `;
     {{- if eq $func.Type "query"}}
     let config = {
-      cadence: code,
+      cadence: code.trim(),
       name: "{{$func.Name}}",
       type: "script",
       args: (arg: any, t: any) => [
@@ -116,15 +119,15 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
-	  	limit: 9999,
+      limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let response = await fcl.query(config);
-    response = await this.runResponseInterceptors(config, response);
-    return response;
+    const result = await this.runResponseInterceptors(config, response);
+    return result.response;
     {{- else}}
     let config = {
-      cadence: code,
+      cadence: code.trim(),
       name: "{{$func.Name}}",
       type: "transaction",
       args: (arg: any, t: any) => [
@@ -132,15 +135,29 @@ const functionTemplate = `{{- range $index, $func := .Functions}}
         arg({{.Name}}, {{getFCLType .TypeStr}}),
         {{- end}}
       ],
-	  limit: 9999,
+      limit: 9999,
     };
     config = await this.runRequestInterceptors(config);
     let txId = await fcl.mutate(config);
-    txId = await this.runResponseInterceptors(config, txId);
-    return txId;
+    const result = await this.runResponseInterceptors(config, txId);
+    return result.response;
     {{- end}}
   }
 {{- end}}`
+
+// decodeBase64ToUTF8 decodes base64 string to UTF-8 string and formats it
+func decodeBase64ToUTF8(base64Str string) string {
+	if base64Str == "" {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(base64Str)
+	if err != nil {
+		return ""
+	}
+	// Trim whitespace and format the code
+	code := strings.TrimSpace(string(decoded))
+	return code
+}
 
 // formatFunctionName formats the filename into a valid TypeScript function name
 func formatFunctionName(filename string) string {
@@ -279,10 +296,7 @@ func (g *Generator) Generate() (string, error) {
 	taggedFunctions := make(map[string][]TypeScriptFunction)
 
 	// Add header with imports
-	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n")
-	buffer.WriteString("import { Buffer } from 'buffer';\n\n")
-	buffer.WriteString("/** Utility function to decode Base64 Cadence code */\n")
-	buffer.WriteString("const decodeCadence = (code: string): string => Buffer.from(code, 'base64').toString('utf8');\n\n")
+	buffer.WriteString("import * as fcl from \"@onflow/fcl\";\n\n")
 	buffer.WriteString("/** Generated from Cadence files */\n")
 
 	// 1. Output all interfaces/types (including composite types)
@@ -392,7 +406,7 @@ func (g *Generator) Generate() (string, error) {
 
 	// 2. Output class header and interceptor related code
 	buffer.WriteString("type RequestInterceptor = (config: any) => any | Promise<any>;\n")
-	buffer.WriteString("type ResponseInterceptor = (config: any, response: any) => any | Promise<any>;\n\n")
+	buffer.WriteString("type ResponseInterceptor = (config: any, response: any) => { config: any; response: any } | Promise<{ config: any; response: any }>;\n\n")
 	buffer.WriteString("export class CadenceService {\n")
 	buffer.WriteString("  private requestInterceptors: RequestInterceptor[] = [];\n")
 	buffer.WriteString("  private responseInterceptors: ResponseInterceptor[] = [];\n\n")
@@ -404,14 +418,14 @@ func (g *Generator) Generate() (string, error) {
 	buffer.WriteString("  useRequestInterceptor(interceptor: RequestInterceptor) {\n    this.requestInterceptors.push(interceptor);\n  }\n\n")
 	buffer.WriteString("  useResponseInterceptor(interceptor: ResponseInterceptor) {\n    this.responseInterceptors.push(interceptor);\n  }\n\n")
 	buffer.WriteString("  private async runRequestInterceptors(config: any) {\n    let c = config;\n    for (const interceptor of this.requestInterceptors) {\n      c = await interceptor(c);\n    }\n    return c;\n  }\n\n")
-	buffer.WriteString("  private async runResponseInterceptors(config: any, response: any) {\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      r = await interceptor(config, r);\n    }\n    return r;\n  }\n\n")
+	buffer.WriteString("  private async runResponseInterceptors(config: any, response: any) {\n    let c = config;\n    let r = response;\n    for (const interceptor of this.responseInterceptors) {\n      const result = await interceptor(c, r);\n      c = result.config;\n      r = result.response;\n    }\n    return { config: c, response: r };\n  }\n\n")
 
 	// Generate functions for transactions
 	for filename, result := range g.Report.Transactions {
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
-			Base64:     result.Base64,
+			Base64:     decodeBase64ToUTF8(result.Base64),
 			Type:       "transaction",
 		}
 
@@ -438,7 +452,7 @@ func (g *Generator) Generate() (string, error) {
 		tsFunction := TypeScriptFunction{
 			Name:       formatFunctionName(filename),
 			Parameters: make([]TypeScriptParameter, 0),
-			Base64:     result.Base64,
+			Base64:     decodeBase64ToUTF8(result.Base64),
 			Type:       "query",
 		}
 
