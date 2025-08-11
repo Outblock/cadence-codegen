@@ -156,6 +156,16 @@ func decodeBase64ToUTF8(base64Str string) string {
 	}
 	// Trim whitespace and format the code
 	code := strings.TrimSpace(string(decoded))
+
+	// Escape special characters for TypeScript template literals
+	// Note: We do NOT escape newlines (\n) as template literals preserve them
+	// Replace backslashes with double backslashes to escape them
+	code = strings.ReplaceAll(code, "\\", "\\\\")
+	// Replace backticks with escaped backticks
+	code = strings.ReplaceAll(code, "`", "\\`")
+	// Replace dollar signs with escaped dollar signs
+	code = strings.ReplaceAll(code, "$", "\\$")
+
 	return code
 }
 
@@ -270,6 +280,17 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 			tsValueType := convertCadenceTypeToTypeScript(valueType)
 
 			return fmt.Sprintf("Record<%s, %s>", tsKeyType, tsValueType)
+		} else if len(parts) == 1 {
+			// Handle cases like {File} where there's no key-value pair
+			// This might be a resource type or interface type
+			singleType := strings.TrimSpace(parts[0])
+			tsType := convertCadenceTypeToTypeScript(singleType)
+			// If the converted type is the same as the original (meaning no mapping found),
+			// treat it as any to avoid TypeScript errors
+			if tsType == singleType {
+				return "any"
+			}
+			return tsType
 		}
 	}
 
