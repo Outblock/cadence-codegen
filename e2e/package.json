@@ -1,0 +1,14 @@
+{
+  "name": "cadence-codegen-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "go run ../main.go typescript ../example ./cadence.generated.ts",
+    "test": "npm run generate && vitest run"
+  },
+  "devDependencies": {
+    "@onflow/fcl": "^1.13.1",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  }
+}

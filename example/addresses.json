@@ -23,7 +23,8 @@
     "0xFlowviewAccountBookmark": "0xdc34f5a7b807bcfb",
     "0xCapabilityFactory": "0x294e44e1ec6993c6",
     "0xCapabilityFilter": "0x294e44e1ec6993c6",
-    "0xFlowClusterQC": "0x9eca2b38b18b5dfe"
+    "0xFlowClusterQC": "0x9eca2b38b18b5dfe",
+    "0xFungibleTokenSwitchboard": "0x9a0766d93b6608b7"
   },
   "mainnet": {
     "0xNonFungibleToken": "0x1d7e57aa55817448",
@@ -50,6 +51,8 @@
     "0xFlowviewAccountBookmark": "0x39b144ab4d348e2b",
     "0xCapabilityFactory": "0xd8a7e05a7ac670c0",
     "0xCapabilityFilter": "0xd8a7e05a7ac670c0",
-    "0xFlowClusterQC": "0x8624b52f9ddcd04a"
+    "0xFlowClusterQC": "0x8624b52f9ddcd04a",
+    "0xFungibleTokenSwitchboard": "0xf233dcee88fe0abe",
+    "0xFlowDomainUtils": "0x1b3930856571a52b"
   }
 }
