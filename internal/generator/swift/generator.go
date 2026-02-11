@@ -32,26 +32,34 @@ func (g *Generator) SetBaseDir(dir string) {
 
 // typeMapping maps Cadence types to Swift types
 var typeMapping = map[string]string{
-	"String":    "String",
-	"Int":       "Int",
-	"UInt":      "UInt",
-	"UInt8":     "UInt8",
-	"UInt16":    "UInt16",
-	"UInt32":    "UInt32",
-	"UInt64":    "UInt64",
-	"UInt128":   "BigUInt",
-	"UInt256":   "BigUInt",
-	"Int8":      "Int8",
-	"Int16":     "Int16",
-	"Int32":     "Int32",
-	"Int64":     "Int64",
-	"Int128":    "BigInt",
-	"Int256":    "BigInt",
-	"Bool":      "Bool",
-	"Address":   "Flow.Address",
-	"UFix64":    "Decimal",
-	"Fix64":     "Decimal",
-	"AnyStruct": "AnyDecodable",
+	"String":      "String",
+	"Character":   "String",
+	"Int":         "Int",
+	"UInt":        "UInt",
+	"UInt8":       "UInt8",
+	"UInt16":      "UInt16",
+	"UInt32":      "UInt32",
+	"UInt64":      "UInt64",
+	"UInt128":     "BigUInt",
+	"UInt256":     "BigUInt",
+	"Int8":        "Int8",
+	"Int16":       "Int16",
+	"Int32":       "Int32",
+	"Int64":       "Int64",
+	"Int128":      "BigInt",
+	"Int256":      "BigInt",
+	"Bool":        "Bool",
+	"Address":     "Flow.Address",
+	"UFix64":      "Decimal",
+	"Fix64":       "Decimal",
+	"AnyStruct":   "AnyDecodable",
+	"AnyResource": "AnyDecodable",
+	"Type":        "String",
+	"StoragePath": "String",
+	"PublicPath":  "String",
+	"PrivatePath": "String",
+	"Path":        "String",
+	"Void":        "Void",
 }
 
 // SwiftCase represents a case in the generated enum
@@ -170,47 +178,58 @@ func formatFunctionName(filename string) string {
 
 // convertCadenceTypeToSwift converts a Cadence type to its Swift equivalent
 func convertCadenceTypeToSwift(cadenceType string) string {
+	cadenceType = strings.TrimSpace(cadenceType)
+
+	// Strip reference markers (&)
+	if strings.HasPrefix(cadenceType, "&") {
+		return convertCadenceTypeToSwift(strings.TrimPrefix(cadenceType, "&"))
+	}
+
+	// Check if it's an optional type
+	if strings.HasSuffix(cadenceType, "?") {
+		baseType := strings.TrimSuffix(cadenceType, "?")
+		return convertCadenceTypeToSwift(baseType) + "?"
+	}
+
+	// Handle generic types like Capability<...> as AnyDecodable
+	if strings.Contains(cadenceType, "<") {
+		return "AnyDecodable"
+	}
+
 	// Check if it's an array type
 	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
-		// Extract element type
 		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
 		elementType = strings.TrimSpace(elementType)
-
-		// Convert element type using type mapping
-		swiftElementType, ok := typeMapping[elementType]
-		if !ok {
-			swiftElementType = elementType
-		}
-
+		swiftElementType := convertCadenceTypeToSwift(elementType)
 		return fmt.Sprintf("[%s]", swiftElementType)
 	}
 
-	// Check if it's a dictionary type
+	// Check if it's a dictionary or intersection type
 	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
-		// Extract key and value types
 		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
-		parts := strings.Split(inner, ":")
-		if len(parts) == 2 {
+		parts := strings.SplitN(inner, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
 			keyType := strings.TrimSpace(parts[0])
 			valueType := strings.TrimSpace(parts[1])
-
-			// Convert key and value types
-			swiftKeyType, ok := typeMapping[keyType]
-			if !ok {
-				swiftKeyType = keyType
-			}
-			swiftValueType, ok := typeMapping[valueType]
-			if !ok {
-				swiftValueType = valueType
-			}
-
+			swiftKeyType := convertCadenceTypeToSwift(keyType)
+			swiftValueType := convertCadenceTypeToSwift(valueType)
 			return fmt.Sprintf("Dictionary<%s, %s>", swiftKeyType, swiftValueType)
+		} else if len(parts) >= 1 {
+			singleType := strings.TrimSpace(parts[0])
+			return convertCadenceTypeToSwift(singleType)
 		}
 	}
 
 	// For non-dictionary types, use the type mapping
 	swiftType, ok := typeMapping[cadenceType]
 	if !ok {
+		if strings.Contains(cadenceType, ".") {
+			result := ""
+			for _, part := range strings.Split(cadenceType, ".") {
+				result += part
+			}
+			return result
+		}
 		return cadenceType
 	}
 	return swiftType
