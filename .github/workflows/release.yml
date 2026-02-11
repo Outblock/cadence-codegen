@@ -48,10 +48,7 @@ jobs:
           
       - name: Get release version
         id: get_version
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
         
       - name: Download release assets
         run: |
@@ -61,7 +58,7 @@ jobs:
           sleep 10
           
           # Download binaries from the release
-          gh release download ${{ steps.get_version.outputs.TAG }} \
+          gh release download v${{ steps.get_version.outputs.VERSION }} \
             --pattern "cadence-codegen_Darwin_x86_64.tar.gz" \
             --pattern "cadence-codegen_Darwin_arm64.tar.gz" \
             --pattern "cadence-codegen_Linux_x86_64.tar.gz" \
