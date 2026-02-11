@@ -104,8 +104,26 @@ func flattenStructName(name string) string {
 	return name
 }
 
+// stripCadenceTypeModifiers removes reference (&) and intersection ({}) syntax
+// from a Cadence type string, preserving the core type structure.
+func stripCadenceTypeModifiers(typeStr string) string {
+	// Remove reference markers
+	result := strings.ReplaceAll(typeStr, "&", "")
+	// Handle intersection types like {Interface} - just extract the type name
+	// But preserve dictionary types like {String: Type}
+	// Intersection types have no colon, dictionaries do
+	if strings.Contains(result, "{") && !strings.Contains(result, ":") {
+		result = strings.ReplaceAll(result, "{", "")
+		result = strings.ReplaceAll(result, "}", "")
+	}
+	return strings.TrimSpace(result)
+}
+
 // flattenReturnType flattens nested type references in return types
 func flattenReturnType(returnType string) string {
+	// First strip Cadence reference/intersection modifiers
+	returnType = stripCadenceTypeModifiers(returnType)
+
 	// Handle array types like "[FlowIDTableStaking.DelegatorInfo]?"
 	if strings.HasPrefix(returnType, "[") && strings.HasSuffix(returnType, "]") {
 		// Extract the inner type
@@ -517,11 +535,38 @@ func (a *Analyzer) FetchContractFromChain(contractName string, network string) e
 	return a.analyzeContractCode(string(decodedCode), originalContractName)
 }
 
+// extractFieldFromLine parses a Cadence struct field line like "let name: Type"
+// and returns (fieldName, fieldType, ok). It captures the full type string
+// after the colon, handling multi-token types like {String: MetadataViews.ExternalURL}.
+func extractFieldFromLine(line string) (string, string, bool) {
+	// Find "let " keyword
+	letIdx := strings.Index(line, "let ")
+	if letIdx == -1 {
+		return "", "", false
+	}
+	rest := line[letIdx+4:] // after "let "
+
+	// Find the colon that separates name from type
+	colonIdx := strings.Index(rest, ":")
+	if colonIdx == -1 {
+		return "", "", false
+	}
+
+	fieldName := strings.TrimSpace(rest[:colonIdx])
+	fieldType := strings.TrimSpace(rest[colonIdx+1:])
+
+	// Clean up trailing characters
+	fieldType = strings.TrimRight(fieldType, ";")
+	fieldType = strings.TrimSpace(fieldType)
+
+	if fieldName == "" || fieldType == "" {
+		return "", "", false
+	}
+	return fieldName, fieldType, true
+}
+
 // analyzeContractCode analyzes Cadence contract code and extracts structure definitions
 func (a *Analyzer) analyzeContractCode(code string, contractName string) error {
-	// This is a simplified version - you might want to use a proper Cadence parser
-	// For now, we'll use regex to find struct definitions
-
 	lines := strings.Split(code, "\n")
 	var currentStructName string
 	var inStruct bool
@@ -535,17 +580,13 @@ func (a *Analyzer) analyzeContractCode(code string, contractName string) error {
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
 				structName := parts[2]
-				// Create a composite name with contract prefix
 				fullStructName := fmt.Sprintf("%s.%s", contractName, structName)
 
-				// Check if we already have this struct
 				if _, exists := a.Structs[fullStructName]; !exists {
-					// Create new struct
-					newStruct := Struct{
+					a.Structs[fullStructName] = Struct{
 						Name:   fullStructName,
 						Fields: []Field{},
 					}
-					a.Structs[fullStructName] = newStruct
 					currentStructName = fullStructName
 					inStruct = true
 					braceCount = 0
@@ -553,39 +594,24 @@ func (a *Analyzer) analyzeContractCode(code string, contractName string) error {
 			}
 		}
 
-		// If we're inside a struct, look for field definitions
 		if inStruct && currentStructName != "" {
-			// Count braces to track struct boundaries
 			braceCount += strings.Count(line, "{")
 			braceCount -= strings.Count(line, "}")
 
-			// Check for field definitions (simplified parsing)
 			if strings.Contains(line, "let") && strings.Contains(line, ":") {
-				// Extract field name and type
-				fieldParts := strings.Fields(line)
-				for j, part := range fieldParts {
-					if part == "let" && j+2 < len(fieldParts) {
-						fieldName := strings.TrimSuffix(fieldParts[j+1], ":")
-						fieldType := strings.TrimSuffix(fieldParts[j+2], ";")
-
-						// Create field
-						field := Field{
-							Name:     fieldName,
-							TypeStr:  fieldType,
-							Optional: strings.Contains(fieldType, "?"),
-						}
-
-						// Get the struct and add the field
-						if structDef, exists := a.Structs[currentStructName]; exists {
-							structDef.Fields = append(structDef.Fields, field)
-							a.Structs[currentStructName] = structDef
-						}
-						break
+				if fieldName, fieldType, ok := extractFieldFromLine(line); ok {
+					field := Field{
+						Name:     fieldName,
+						TypeStr:  fieldType,
+						Optional: strings.HasSuffix(fieldType, "?"),
+					}
+					if structDef, exists := a.Structs[currentStructName]; exists {
+						structDef.Fields = append(structDef.Fields, field)
+						a.Structs[currentStructName] = structDef
 					}
 				}
 			}
 
-			// Check if we've reached the end of the struct
 			if braceCount <= 0 {
 				inStruct = false
 				currentStructName = ""
@@ -596,6 +622,42 @@ func (a *Analyzer) analyzeContractCode(code string, contractName string) error {
 	return nil
 }
 
+// cleanCadenceType strips Cadence type syntax (references, intersections, optionals,
+// arrays, dictionaries, generics, auth) and returns individual "Contract.Struct" type names.
+func cleanCadenceType(typeStr string) []string {
+	// Remove optional markers
+	s := strings.TrimSuffix(typeStr, "?")
+	// Remove reference markers
+	s = strings.ReplaceAll(s, "&", "")
+	// Remove array brackets
+	s = strings.ReplaceAll(s, "[", "")
+	s = strings.ReplaceAll(s, "]", "")
+	// Remove generic/auth syntax: replace < > ( ) with spaces
+	s = strings.ReplaceAll(s, "<", " ")
+	s = strings.ReplaceAll(s, ">", " ")
+	s = strings.ReplaceAll(s, "(", " ")
+	s = strings.ReplaceAll(s, ")", " ")
+	// Replace braces with spaces so we can split
+	s = strings.ReplaceAll(s, "{", " ")
+	s = strings.ReplaceAll(s, "}", " ")
+	// Split by common delimiters (colon for dict, comma, space)
+	tokens := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ':' || r == ',' || r == ' '
+	})
+	var result []string
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		// Only include tokens that look like "Contract.Struct" (exactly 2 parts)
+		if token != "" && strings.Contains(token, ".") {
+			parts := strings.Split(token, ".")
+			if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
+				result = append(result, token)
+			}
+		}
+	}
+	return result
+}
+
 // ResolveNestedTypes resolves nested type references by fetching contracts from chain
 func (a *Analyzer) ResolveNestedTypes(network string) error {
 	// Collect all nested type references that are actually used
@@ -603,20 +665,15 @@ func (a *Analyzer) ResolveNestedTypes(network string) error {
 
 	// Helper function to extract nested types from a type string
 	extractNestedTypes := func(typeStr string) {
-		if strings.Contains(typeStr, ".") {
-			// Remove array brackets and optional markers first
-			cleanType := strings.TrimSuffix(strings.TrimSuffix(typeStr, "?"), "]")
-			cleanType = strings.TrimPrefix(cleanType, "[")
-			if strings.Contains(cleanType, ".") {
-				parts := strings.Split(cleanType, ".")
-				if len(parts) == 2 {
-					contractName := parts[0]
-					structName := parts[1]
-					if nestedTypes[contractName] == nil {
-						nestedTypes[contractName] = make(map[string]bool)
-					}
-					nestedTypes[contractName][structName] = true
+		for _, cleanType := range cleanCadenceType(typeStr) {
+			parts := strings.Split(cleanType, ".")
+			if len(parts) == 2 {
+				contractName := parts[0]
+				structName := parts[1]
+				if nestedTypes[contractName] == nil {
+					nestedTypes[contractName] = make(map[string]bool)
 				}
+				nestedTypes[contractName][structName] = true
 			}
 		}
 	}
@@ -734,9 +791,6 @@ func (a *Analyzer) FetchContractFromChainSelective(contractName string, network 
 
 // analyzeContractCodeSelective analyzes Cadence contract code and extracts only specified structure definitions
 func (a *Analyzer) analyzeContractCodeSelective(code string, contractName string, structNames map[string]bool) error {
-	// This is a simplified version - you might want to use a proper Cadence parser
-	// For now, we'll use regex to find struct definitions
-
 	lines := strings.Split(code, "\n")
 	var currentStructName string
 	var inStruct bool
@@ -750,19 +804,14 @@ func (a *Analyzer) analyzeContractCodeSelective(code string, contractName string
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
 				structName := parts[2]
-				// Only process if this struct is in our list of needed structs
 				if structNames[structName] {
-					// Create a composite name with contract prefix
 					fullStructName := fmt.Sprintf("%s.%s", contractName, structName)
 
-					// Check if we already have this struct
 					if _, exists := a.Structs[fullStructName]; !exists {
-						// Create new struct
-						newStruct := Struct{
+						a.Structs[fullStructName] = Struct{
 							Name:   fullStructName,
 							Fields: []Field{},
 						}
-						a.Structs[fullStructName] = newStruct
 						currentStructName = fullStructName
 						inStruct = true
 						braceCount = 0
@@ -771,39 +820,24 @@ func (a *Analyzer) analyzeContractCodeSelective(code string, contractName string
 			}
 		}
 
-		// If we're inside a struct, look for field definitions
 		if inStruct && currentStructName != "" {
-			// Count braces to track struct boundaries
 			braceCount += strings.Count(line, "{")
 			braceCount -= strings.Count(line, "}")
 
-			// Check for field definitions (simplified parsing)
 			if strings.Contains(line, "let") && strings.Contains(line, ":") {
-				// Extract field name and type
-				fieldParts := strings.Fields(line)
-				for j, part := range fieldParts {
-					if part == "let" && j+2 < len(fieldParts) {
-						fieldName := strings.TrimSuffix(fieldParts[j+1], ":")
-						fieldType := strings.TrimSuffix(fieldParts[j+2], ";")
-
-						// Create field
-						field := Field{
-							Name:     fieldName,
-							TypeStr:  fieldType,
-							Optional: strings.Contains(fieldType, "?"),
-						}
-
-						// Get the struct and add the field
-						if structDef, exists := a.Structs[currentStructName]; exists {
-							structDef.Fields = append(structDef.Fields, field)
-							a.Structs[currentStructName] = structDef
-						}
-						break
+				if fieldName, fieldType, ok := extractFieldFromLine(line); ok {
+					field := Field{
+						Name:     fieldName,
+						TypeStr:  fieldType,
+						Optional: strings.HasSuffix(fieldType, "?"),
+					}
+					if structDef, exists := a.Structs[currentStructName]; exists {
+						structDef.Fields = append(structDef.Fields, field)
+						a.Structs[currentStructName] = structDef
 					}
 				}
 			}
 
-			// Check if we've reached the end of the struct
 			if braceCount <= 0 {
 				inStruct = false
 				currentStructName = ""

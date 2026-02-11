@@ -35,26 +35,34 @@ func (g *Generator) SetBaseDir(dir string) {
 
 // typeMapping maps Cadence types to TypeScript types
 var typeMapping = map[string]string{
-	"String":    "string",
-	"Int":       "number",
-	"UInt":      "number",
-	"UInt8":     "number",
-	"UInt16":    "number",
-	"UInt32":    "number",
-	"UInt64":    "number",
-	"UInt128":   "string",
-	"UInt256":   "string",
-	"Int8":      "number",
-	"Int16":     "number",
-	"Int32":     "number",
-	"Int64":     "number",
-	"Int128":    "string",
-	"Int256":    "string",
-	"Bool":      "boolean",
-	"Address":   "string",
-	"UFix64":    "string",
-	"Fix64":     "string",
-	"AnyStruct": "any",
+	"String":      "string",
+	"Character":   "string",
+	"Int":         "number",
+	"UInt":        "number",
+	"UInt8":       "number",
+	"UInt16":      "number",
+	"UInt32":      "number",
+	"UInt64":      "number",
+	"UInt128":     "string",
+	"UInt256":     "string",
+	"Int8":        "number",
+	"Int16":       "number",
+	"Int32":       "number",
+	"Int64":       "number",
+	"Int128":      "string",
+	"Int256":      "string",
+	"Bool":        "boolean",
+	"Address":     "string",
+	"UFix64":      "string",
+	"Fix64":       "string",
+	"AnyStruct":   "any",
+	"AnyResource": "any",
+	"Type":        "string",
+	"StoragePath": "string",
+	"PublicPath":  "string",
+	"PrivatePath": "string",
+	"Path":        "string",
+	"Void":        "void",
 }
 
 // fclTypeMapping only includes types that need special handling in FCL
@@ -199,6 +207,11 @@ func formatFunctionName(filename string) string {
 
 // getFCLType gets the FCL type annotation for a Cadence type
 func getFCLType(cadenceType string) string {
+	// Strip reference markers
+	if strings.HasPrefix(cadenceType, "&") {
+		return getFCLType(strings.TrimPrefix(cadenceType, "&"))
+	}
+
 	// Check if it's an optional type - strip the ? for FCL type
 	if strings.HasSuffix(cadenceType, "?") {
 		baseType := strings.TrimSuffix(cadenceType, "?")
@@ -213,15 +226,18 @@ func getFCLType(cadenceType string) string {
 		return fmt.Sprintf("t.Array(%s)", getFCLType(elementType))
 	}
 
-	// Check if it's a dictionary type
+	// Check if it's a dictionary or intersection type
 	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
-		// Extract key and value types
 		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
 		parts := strings.Split(inner, ":")
 		if len(parts) == 2 {
 			keyType := strings.TrimSpace(parts[0])
 			valueType := strings.TrimSpace(parts[1])
 			return fmt.Sprintf("t.Dictionary({ key: %s, value: %s })", getFCLType(keyType), getFCLType(valueType))
+		}
+		// Intersection type like {Interface} - treat as the inner type
+		if len(parts) == 1 {
+			return getFCLType(strings.TrimSpace(parts[0]))
 		}
 	}
 
@@ -250,6 +266,13 @@ func flattenStructName(name string) string {
 
 // convertCadenceTypeToTypeScript converts a Cadence type to its TypeScript equivalent
 func convertCadenceTypeToTypeScript(cadenceType string) string {
+	cadenceType = strings.TrimSpace(cadenceType)
+
+	// Strip reference markers (&)
+	if strings.HasPrefix(cadenceType, "&") {
+		return convertCadenceTypeToTypeScript(strings.TrimPrefix(cadenceType, "&"))
+	}
+
 	// Check if it's an optional type
 	if strings.HasSuffix(cadenceType, "?") {
 		baseType := strings.TrimSuffix(cadenceType, "?")
@@ -257,39 +280,36 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 		return fmt.Sprintf("%s | undefined", tsType)
 	}
 
+	// Handle generic types like Capability<...> as any
+	if strings.Contains(cadenceType, "<") {
+		return "any"
+	}
+
 	// Check if it's an array type
 	if strings.HasPrefix(cadenceType, "[") && strings.HasSuffix(cadenceType, "]") {
-		// Extract element type
 		elementType := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "]"), "[")
 		elementType = strings.TrimSpace(elementType)
-
-		// Convert element type recursively
 		tsElementType := convertCadenceTypeToTypeScript(elementType)
-
 		return fmt.Sprintf("%s[]", tsElementType)
 	}
 
-	// Check if it's a dictionary type
+	// Check if it's a dictionary or intersection type wrapped in {}
 	if strings.HasPrefix(cadenceType, "{") && strings.HasSuffix(cadenceType, "}") {
-		// Extract key and value types
 		inner := strings.TrimPrefix(strings.TrimSuffix(cadenceType, "}"), "{")
-		parts := strings.Split(inner, ":")
-		if len(parts) == 2 {
+		// Use SplitN to only split on first colon (value type might contain colons)
+		parts := strings.SplitN(inner, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
 			keyType := strings.TrimSpace(parts[0])
 			valueType := strings.TrimSpace(parts[1])
 
-			// Convert key and value types recursively
 			tsKeyType := convertCadenceTypeToTypeScript(keyType)
 			tsValueType := convertCadenceTypeToTypeScript(valueType)
 
 			return fmt.Sprintf("Record<%s, %s>", tsKeyType, tsValueType)
-		} else if len(parts) == 1 {
-			// Handle cases like {File} where there's no key-value pair
-			// This might be a resource type or interface type
+		} else if len(parts) >= 1 {
+			// Handle intersection types like {Interface} or {Contract.Type}
 			singleType := strings.TrimSpace(parts[0])
 			tsType := convertCadenceTypeToTypeScript(singleType)
-			// If the converted type is the same as the original (meaning no mapping found),
-			// treat it as any to avoid TypeScript errors
 			if tsType == singleType {
 				return "any"
 			}
@@ -300,7 +320,7 @@ func convertCadenceTypeToTypeScript(cadenceType string) string {
 	// For non-dictionary types, use the type mapping
 	tsType, ok := typeMapping[cadenceType]
 	if !ok {
-		// New: If it's a nested name, flatten it
+		// If it's a nested name, flatten it
 		if strings.Contains(cadenceType, ".") {
 			return flattenStructName(cadenceType)
 		}
@@ -444,6 +464,77 @@ func (g *Generator) Generate() (string, error) {
 			}
 			buffer.WriteString("\n\n")
 		}
+	}
+
+	// Collect all defined type names
+	definedTypes := make(map[string]bool)
+	// Built-in types and interfaces we defined above
+	for k := range typeMapping {
+		definedTypes[k] = true
+	}
+	definedTypes["FlowSigner"] = true
+	definedTypes["CompositeSignature"] = true
+	definedTypes["AuthorizationAccount"] = true
+	definedTypes["AuthorizationFunction"] = true
+	// Types from generated interfaces
+	for _, composite := range g.Report.Structs {
+		definedTypes[flattenStructName(composite.Name)] = true
+	}
+	for _, composite := range regularStructs {
+		definedTypes[flattenStructName(composite.Name)] = true
+	}
+
+	// Collect all referenced type names from struct fields, function params, and return types
+	referencedTypes := make(map[string]bool)
+	collectType := func(tsType string) {
+		// Strip array suffix, | undefined, etc
+		clean := tsType
+		clean = strings.TrimSuffix(clean, " | undefined")
+		clean = strings.TrimSuffix(clean, "[]")
+		if clean == "string" || clean == "number" || clean == "boolean" || clean == "any" || clean == "void" || clean == "" {
+			return
+		}
+		if strings.HasPrefix(clean, "Record<") || strings.Contains(clean, " ") {
+			return
+		}
+		referencedTypes[clean] = true
+	}
+	for _, composite := range g.Report.Structs {
+		for _, field := range composite.Fields {
+			collectType(convertCadenceTypeToTypeScript(field.TypeStr))
+		}
+	}
+	// Collect from script/transaction return types and parameters
+	for _, result := range g.Report.Scripts {
+		if result.ReturnType != "" {
+			collectType(convertCadenceTypeToTypeScript(result.ReturnType))
+		}
+		for _, param := range result.Parameters {
+			collectType(convertCadenceTypeToTypeScript(param.TypeStr))
+		}
+	}
+	for _, result := range g.Report.Transactions {
+		if result.ReturnType != "" {
+			collectType(convertCadenceTypeToTypeScript(result.ReturnType))
+		}
+		for _, param := range result.Parameters {
+			collectType(convertCadenceTypeToTypeScript(param.TypeStr))
+		}
+	}
+
+	// Generate type aliases for undefined referenced types
+	var undefinedTypes []string
+	for t := range referencedTypes {
+		if !definedTypes[t] {
+			undefinedTypes = append(undefinedTypes, t)
+		}
+	}
+	sort.Strings(undefinedTypes)
+	for _, t := range undefinedTypes {
+		buffer.WriteString(fmt.Sprintf("export type %s = any;\n", t))
+	}
+	if len(undefinedTypes) > 0 {
+		buffer.WriteString("\n")
 	}
 
 	// 2. Output class header and interceptor related code

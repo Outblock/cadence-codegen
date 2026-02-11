@@ -35,3 +35,4 @@ dist/
 /generated
 cadence.json
 cadence.generated.ts
+node_modules/

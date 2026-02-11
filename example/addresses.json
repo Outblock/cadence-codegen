@@ -15,7 +15,16 @@
     "0xHybridCustody": "0x294e44e1ec6993c6",
     "0xViewResolver": "0x631e88ae7f1d7c20",
     "0xEVM": "0x8c5303eaa26202d6",
-    "0xFlowEVMBridge": "0xdfc20aee650fcbdf"
+    "0xFlowEVMBridge": "0xdfc20aee650fcbdf",
+    "0xFlowIDTableStaking": "0x9eca2b38b18b5dfe",
+    "0xFlowStakingCollection": "0x95e019a17d0e23d7",
+    "0xFlowEpoch": "0x9eca2b38b18b5dfe",
+    "0xNFTStorefrontV2": "0x2d55b98eb200daef",
+    "0xFlowviewAccountBookmark": "0xdc34f5a7b807bcfb",
+    "0xCapabilityFactory": "0x294e44e1ec6993c6",
+    "0xCapabilityFilter": "0x294e44e1ec6993c6",
+    "0xFlowClusterQC": "0x9eca2b38b18b5dfe",
+    "0xFungibleTokenSwitchboard": "0x9a0766d93b6608b7"
   },
   "mainnet": {
     "0xNonFungibleToken": "0x1d7e57aa55817448",
@@ -36,6 +45,14 @@
     "0xFlowEVMBridge": "0x1e4aa0b87d10b141",
     "0xFlowStakingCollection": "0x8d0e87b65159ae63",
     "0xFlowIDTableStaking": "0x8624b52f9ddcd04a",
-    "0xLockedTokens": "0x8d0e87b65159ae63"
+    "0xLockedTokens": "0x8d0e87b65159ae63",
+    "0xFlowEpoch": "0x8624b52f9ddcd04a",
+    "0xNFTStorefrontV2": "0x4eb8a10cb9f87357",
+    "0xFlowviewAccountBookmark": "0x39b144ab4d348e2b",
+    "0xCapabilityFactory": "0xd8a7e05a7ac670c0",
+    "0xCapabilityFilter": "0xd8a7e05a7ac670c0",
+    "0xFlowClusterQC": "0x8624b52f9ddcd04a",
+    "0xFungibleTokenSwitchboard": "0xf233dcee88fe0abe",
+    "0xFlowDomainUtils": "0x1b3930856571a52b"
   }
 }
