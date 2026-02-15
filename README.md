@@ -80,6 +80,24 @@ cadence-codegen typescript ./contracts output.ts
 cadence-codegen typescript analysis.json output.ts
 ```
 
+### Generate Go Code
+
+Generate Go code from Cadence files or JSON:
+
+```bash
+# Generate from Cadence files (outputs to cadence_generated.go)
+cadence-codegen golang ./contracts
+
+# Using the "go" alias
+cadence-codegen go ./contracts
+
+# Generate from Cadence files with custom output path
+cadence-codegen golang ./contracts output.go
+
+# Generate from previously analyzed JSON
+cadence-codegen golang analysis.json output.go
+```
+
 ## Features
 
 - Analyzes Cadence files (.cdc)
@@ -92,6 +110,7 @@ cadence-codegen typescript analysis.json output.ts
   - Structured JSON output
   - Swift code with type-safe wrappers
   - TypeScript code with FCL integration
+  - Go code with typed structs and helper functions
 - Supports folder-based tagging for better organization
 - Base64 encoding of Cadence files (optional)
 
@@ -192,6 +211,45 @@ const result = await service.getAddr(flowAddress);
 
 // Send a transaction
 const txId = await service.createCoa(amount);
+```
+
+## Generated Go Code
+
+The generated Go code includes:
+
+- Typed Go structs from Cadence composite types (with JSON tags)
+- Base64-encoded Cadence code constants with decoder functions
+- Parameter structs for typed access to transaction/script arguments
+- Cadence-to-Go type mapping (`Int`/`UInt` families to native Go types, `Int128`/`Int256`/`UInt128`/`UInt256` to `*big.Int`, `UFix64`/`Fix64`/`Address` to `string`)
+- Support for arrays, dictionaries, optionals, and nested types
+- Tag-based grouping via comment sections
+
+Example usage of generated Go code:
+
+```go
+package main
+
+import (
+    "fmt"
+    cadence "path/to/cadence_generated"
+)
+
+func main() {
+    // Get the Cadence code for a transaction
+    code := cadence.TransferTokensCode()
+    fmt.Println(code)
+
+    // Use typed parameter struct
+    params := cadence.TransferTokensParams{
+        Amount: "10.0",
+        To:     "0x1234567890abcdef",
+    }
+    fmt.Printf("Transfer %s to %s\n", params.Amount, params.To)
+
+    // Get the Cadence code for a script
+    scriptCode := cadence.GetBalanceCode()
+    fmt.Println(scriptCode)
+}
 ```
 
 ## NPM Integration
